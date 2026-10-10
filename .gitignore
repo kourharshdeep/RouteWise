@@ -4,4 +4,3 @@ cache/
 __pycache__/
 *.tif
 .cdsapirc
-data/weather_daily_by_segment.csv
