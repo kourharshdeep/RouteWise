@@ -1,0 +1,6 @@
+.env
+venv/
+cache/
+__pycache__/
+*.tif
+.cdsapirc
