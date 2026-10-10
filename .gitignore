@@ -1,6 +1,25 @@
+# secrets (never commit)
 .env
+.cdsapirc
+*.key
+
+# virtual env and caches
 venv/
+.venv/
 cache/
 __pycache__/
+*.pyc
+
+# large or regenerable data
+*.nc
 *.tif
-.cdsapirc
+data/weather/
+
+# intermediate reports
+data/geocode_report.csv
+data/needs_manual_coordinates.csv
+data/weather_daily_by_segment.csv
+
+# OS and editor files
+.DS_Store
+Thumbs.db
