@@ -14,12 +14,13 @@ __pycache__/
 *.nc
 *.tif
 data/weather/
+data/weather_daily_by_segment.csv
 
 # intermediate reports
 data/geocode_report.csv
 data/needs_manual_coordinates.csv
-data/weather_daily_by_segment.csv
 
 # OS and editor files
 .DS_Store
 Thumbs.db
+.vscode/
