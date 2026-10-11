@@ -24,3 +24,6 @@ data/needs_manual_coordinates.csv
 .DS_Store
 Thumbs.db
 .vscode/
+
+# SQL offline Database
+*.db
