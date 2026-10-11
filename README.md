@@ -1,86 +1,94 @@
 # RouteWise
 
-Road-disruption risk modelling for a pilot stretch of **NH-44 (Ramban to Banihal, Jammu & Kashmir)**, a landslide-prone highway corridor. The pipeline builds a road graph with terrain, attaches daily weather to each road segment, links reported disruption events to segments, and prepares a dataset for a spatio-temporal graph model (ST-GNN).
+Predictive, offline-first route safety for **NH-44 in Jammu & Kashmir**.
+RouteWise models landslide, snow and shooting-stone disruption risk for each road segment of the highway, so that routes can later be chosen on predicted safety and not just distance. It is a minor project (Group 21, MIET Jalandhar).
 
-> Status: work in progress (Weeks 1 to 4 done). Modelling comes next.
+**Pilot corridor:** Ramban to Banihal (latitude 33.211 to 33.475, longitude 75.161 to 75.262), a landslide-prone stretch of the Jammu-Srinagar highway.
 
-## Pilot corridor
+**Status:** work in progress. Weeks 1 to 3 of the project timeline are done, plus the dataset preparation for the model. The ST-GNN model is next.
 
-Bounding box: latitude 33.211 to 33.475, longitude 75.161 to 75.262 (about 25 km of NH-44). Graph: 76 nodes, 151 edges.
+## Project plan and progress
 
-## Pipeline (run in this order)
+| Timeline week | Topic | Status |
+|---|---|---|
+| 1 | GIS data and NH-44 graph | Done |
+| 2 | Weather and historical disruption data | Done |
+| 3 | Offline-first SQLite schema | Done |
+| Prep | Dataset for the model (feeds weeks 6 and 7) | Done |
+| 6 | ST-GNN architecture | Next |
+| 7 | ST-GNN training and tuning (Google Colab) | Next |
+| 5 | Backend sync and conflict resolution (FastAPI) | Planned |
+| 4 | Mobile app with offline capture (Flutter) | Planned |
+| 8 | Risk-aware routing | Planned |
+| 9 | Dashboard | Planned |
+| 10 to 12 | Integration, validation, report and demo | Planned |
 
-| Step | Script | What it does | Main output |
-|------|--------|--------------|-------------|
-| Week 1 | `week1_graph_and_terrain.py` | Pulls the road network from OpenStreetMap (OSMnx), downloads SRTM elevation from OpenTopography, attaches elevation, slope and road type to every road segment | `nh44_corridor_graph.graphml`, `week1_corridor_map.png` |
-| Week 2A | `week2a_download_weather.py` | Downloads ERA5-Land weather data for the corridor | `data/weather/*.nc` (not in Git) |
-| Week 2B | `week2b_process_weather.py` | Turns the weather files into daily values per road segment | `data/weather_daily_by_segment.csv` (not in Git) |
-| Week 2C | `week2c_fill_from_candidates.py` | Builds `data/disruption_log.csv` from reported events in `data/disruption_candidates.csv`, using hand-checked coordinates from `data/place_coordinates.csv` first, then place-name lookup | `data/disruption_log.csv` |
-| Week 2C | `week2c_disruption_log.py` | Snaps each event to the nearest road segment and maps them | `data/disruption_log_snapped.csv`, `data/labelled_events.csv`, `data/events_map.png`|
-| Week 3 | `week3_create_db.py`, `week3_offline_schema.sql` | Creates the local database from the schema | `data/routewise_local.db` (not in Git) |
-| Week 4 | `week4_build_dataset.py` | Builds the modelling dataset: static features per road segment, the segment adjacency graph, and labelled segment-days split by time into train (2021-2022), val (2023) and test (2024-2025) | `data/segment_static.csv`, `data/segment_adjacency.csv`, `data/training_samples.csv` |
+The model comes before the app because routing (week 8) needs the model's output.
+
+## What exists so far
+
+| Script | What it does |
+|---|---|
+| `week1_graph_and_terrain.py` | Builds the road graph from OpenStreetMap (76 nodes, 151 edges), adds SRTM elevation and slope, saves `nh44_corridor_graph.graphml` and a map |
+| `week2a_download_weather.py` | Downloads ERA5-Land weather (2021 to 2025) for the corridor |
+| `week2b_process_weather.py` | Converts weather into one table of daily values per road segment, with 3-day and 7-day rainfall |
+| `week2c_fill_from_candidates.py` | Looks up coordinates for the sourced disruption events in `data/disruption_candidates.csv` and writes `data/disruption_log.csv` |
+| `week2c_disruption_log.py` | Snaps logged events to the nearest NH-44 segment, writes `data/labelled_events.csv` and `data/events_map.png` |
+| `week3_offline_schema.sql`, `week3_create_db.py` | Offline SQLite schema (hazard reports, photos, risk cache, sync queue) and a test of it |
+| `week4_build_dataset.py` | Builds the model's training tables with a time-based split (train 2021 to 2022, validation 2023, test 2024 to 2025). This is dataset preparation, not the timeline's week 4 (the mobile app) |
 
 ## Setup
 
-Python 3.11 is recommended.
+Python 3.11, on Windows (PowerShell):
 
 ```
 python -m venv venv
 venv\Scripts\activate
-pip install osmnx rasterio networkx geopandas requests pandas matplotlib
+pip install -r requirements.txt
 ```
-
-Also install the packages that the weather and database scripts import (check the `import` lines at the top of `week2a`, `week2b`, `week3` and `week4`). Once everything runs, save the list with `pip freeze > requirements.txt` and commit it.
 
 ### API keys (never commit these)
 
-- **OpenTopography** (elevation): set an environment variable, then open a new terminal.
-  ```
-  setx OPENTOPO_API_KEY "your-key"
-  ```
-- **Copernicus Climate Data Store** (ERA5-Land weather): put your key in `~/.cdsapirc`, as described in the CDS API documentation.
+| Key | Used for | Where it goes |
+|---|---|---|
+| OpenTopography API key | SRTM elevation (week 1) | `.env` as `OPENTOPO_API_KEY=your_key` |
+| Copernicus Climate Data Store token | ERA5-Land weather (week 2) | `C:\Users\<you>\.cdsapirc` |
 
-`.env`, `.cdsapirc` and `*.key` are listed in `.gitignore`.
+`.env`, `.cdsapirc`, `venv/`, `cache/` and the large weather files are in `.gitignore`. Check `git status` before every commit.
 
-## Disruption event data
-
-Events are real, reported incidents (landslides, shooting stones, snow, closures), each with a source link, collected in `data/disruption_candidates.csv`.
-
-To add events:
-
-1. Add a row to `data/disruption_candidates.csv`, with the source URL.
-2. If the place isn't found automatically, add a line to `data/place_coordinates.csv` in the form `keyword,lat,lon`. Get the coordinates from Google Maps (right-click the spot on NH-44). The first matching keyword wins, so list specific names above general ones.
-3. Run `week2c_fill_from_candidates.py`, then `week2c_disruption_log.py`.
-
-Each event in `disruption_log_snapped.csv` gets a `segment_id` (the road segment, written as `u_v_k`), a `snap_dist_m` (distance to that segment in meters) and a `snap_ok` flag (`True` when the event is within 1.5 km of a road). `labelled_events.csv` keeps only the `snap_ok` events and is the input to Week 4. Only events from 2021 to 2025 (the weather window) can be used as training labels.
-
-## Limitations
-
-- **Coordinates are approximate.** Most events come from news reports that name a village or stretch, not an exact location. Rows are marked `location_confidence` of `low` (place-name lookup) or `medium` (hand-checked on Google Maps).
-- **Some dates need checking.** Rows whose notes start with `CHECK DATE` were inferred from wording like "Saturday" in the article. Confirm the date at the source link before training on them.
-- **Events outside the corridor.** Some reported events (for example around Chanderkote and Dewal) are south of the pilot corridor, so they can't be matched to a road segment. Use `snap_ok` to leave them out of training.
-- **Long road segments.** The simplified graph has few nodes, so edges are long and events are concentrated on a few segments. Splitting edges into shorter pieces is planned before modelling.
-- **Terrain resolution.** Slope comes from SRTM at 30 m, with elevation sampled at the two ends of each segment, so it understates steepness on winding roads. Edge slope is capped to reduce noise on short edges.
-
-## Repository layout
+## Run order
 
 ```
-week1_graph_and_terrain.py      road graph + terrain
-week2a_download_weather.py      weather download
-week2b_process_weather.py       weather per segment
-week2c_fill_from_candidates.py  event log builder
-week2c_disruption_log.py        event snapping + map
-week3_create_db.py              local database
-week3_offline_schema.sql        database schema
-week4_build_dataset.py          dataset builder
-data/                           event files, snapped events, map
+python week1_graph_and_terrain.py
+python week2a_download_weather.py
+python week2b_process_weather.py
+python week2c_fill_from_candidates.py
+python week2c_disruption_log.py
+python week3_create_db.py
+python week4_build_dataset.py
 ```
 
-Generated or large files (weather `.nc` files, DEM `.tif`, the weather CSV and the local database) are not tracked in Git. Re-create them with the scripts above.
+Before `week2c_fill_from_candidates.py`, fill in `data/place_coordinates.csv` (latitude and longitude of each named place, from Google Maps). Place-name lookup alone puts many events at the town centre.
 
-## Data sources
+## Data and sources
 
-- Road network: OpenStreetMap contributors (via OSMnx)
-- Elevation: SRTM, via the OpenTopography API
+- Road network: OpenStreetMap contributors, via OSMnx
+- Elevation: SRTM, via OpenTopography
 - Weather: ERA5-Land, Copernicus Climate Change Service
-- Disruption events: news reports, each listed with its source link in the CSV
+- Disruption events: reported incidents from news outlets (Greater Kashmir, The Tribune, Kashmir Life, Deccan Herald, ETV Bharat and others). Every event in `data/disruption_candidates.csv` has a source link. No event is invented or simulated.
+
+## Known limitations
+
+- **Few independent events.** Consecutive-day closures are one disaster logged on several days, so test scores will be rough.
+- **Approximate locations.** Event coordinates come from place names, usually village level. Each is marked low or medium confidence.
+- **Some dates need checking.** Rows whose notes start with `CHECK DATE` were inferred and should be confirmed from the linked article.
+- **Reported events only.** The log leans toward major closures that made the news, so small slides are missing.
+- **Sampled negatives.** The training tables keep every real event and sample the other days, so model outputs will be relative risk scores, not true daily probabilities.
+- **Coarse weather.** ERA5-Land cells are about 9 km, so neighbouring segments often share the same weather.
+- **Coarse terrain.** SRTM is about 30 m resolution, which blurs steep slopes.
+
+## Next steps
+
+1. Confirm the `CHECK DATE` events.
+2. Train the ST-GNN in Google Colab and compare it against a rainfall-only baseline.
+3. Build the FastAPI backend, then the Flutter app, then routing and the dashboard.
