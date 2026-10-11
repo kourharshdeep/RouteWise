@@ -1,0 +1,93 @@
+date,segment_id,location_desc,disruption_type,closure,location_confidence,snap_dist_m,source_url
+2018-02-06,2477018477_3924626150_0,Ramsu Ramban NH-44,landslide,full,medium,39.3,https://timesofindia.indiatimes.com/india/jk-highway-closed-after-landslide-in-ramban/articleshow/62802288.cms
+2018-02-24,12734157829_2477018477_0,Maroog Ramban NH-44,landslide,full,full,107.2,https://timesofindia.indiatimes.com/city/jammu/traffic-suspended-on-jammu-srinagar-national-highway/articleshow/63065422.cms
+2018-03-02,2477018477_3924626150_0,Digdol Ramsoo Ramban NH-44,landslide,full,full,39.3,https://www.ndtv.com/india-news/jammu-srinagar-highway-shut-due-to-landslides-in-ramban-1818916
+2018-07-20,2477018477_3924626150_0,Digdole near Ramban town,landslide,unknown,medium,39.3,https://kashmirlife.net/landslide-closes-srinagar-jammu-highway-181134/
+2018-08-25,2477018477_3924626150_0,Ramsoo near Block Development Office Ramban NH-44,landslide,full,medium,39.3,https://www.ndtv.com/jammu-news/jammu-srinagar-national-highway-closed-after-rains-trigger-landslide-1905942
+2018-10-20,2477018477_3924626150_0,Ramsoo Ramban NH-44,landslide,full,medium,39.3,https://indianexpress.com/article/cities/jammu/massive-landslide-blocks-jammu-srinagar-highway-5410739/
+2019-01-22,2477018477_3924626150_0,Digdol–Panthiyal–Magerkote–Khooni Nallah NH-44,landslide,full,medium,39.3,https://www.indiatoday.in/india/story/avalanche-hits-jawahar-tunnel-jammu-srinagar-highway-closed-1436242-2019-01-22
+2019-01-31,1760616414_3924617497_0,Banihal sector near Jawahar tunnel,snow,full,medium,102.8,https://kashmirlife.net/jammu-srinagar-highway-closed-after-fresh-snowfall-200217/
+2019-02-21,9584203847_9584168042_0,Khooni Nallah–Panthiyal–Digdol–Battery Cheshma–Maroog NH-44,landslide,full,medium,95.0,https://indianexpress.com/article/india/j-k-jammu-srinagar-highway-closed-for-second-day-hit-by-five-fresh-landslides-5594391/
+2019-04-15,2477018477_3924626150_0,Digdol Ramban NH-44,landslide,full,full,39.3,https://timesofindia.indiatimes.com/city/jammu/jammu-srinagar-highway-restored-after-seven-hour-long-road-clearance-operation/articleshow/68902996.cms
+2019-05-09,2477018477_3924626150_0,Digdol,landslide,unknown,medium,39.3,https://etvbharat.com/english/state/jammu-and-kashmir/j-k-highway-closed-due-to-landslide-in-ramban-1-1/na20190509152625226
+2019-06-12,2477018477_3924626150_0,Panthyal and Digdol,shooting_stones,full,medium,39.3,https://kashmirlife.net/traffic-restored-on-srinagar-jammu-highway-mughal-road-closed-211956/
+2019-11-14,2477017966_12734157829_0,Ramban (place not named),landslide,full,medium,21.1,https://www.deccanherald.com/india/jammu-srinagar-highway-closed-for-third-day-776753.html
+2020-01-04,2477018477_3924626150_0,Digdol Ramban NH-44,landslide,full,full,39.3,https://www.ndtv.com/india-news/jammu-srinagar-national-highway-shut-again-amid-traffic-after-landslide-2158590
+2020-01-07,9584203847_9584168042_0,Panthiyal–Digdol–Maroog–Moumpassi NH-44,landslide,full,medium,95.0,https://indianexpress.com/article/india/snowfall-and-landslides-keep-jammu-srinagar-nh-closed-for-the-second-day/
+2020-01-22,9584203847_9584168042_0,Panthiyal–Ramsu Ramban NH-44,landslide,full,medium,95.0,https://www.ndtv.com/jammu-news/man-dead-after-landslide-hits-car-on-jammu-srinagar-highway-2167937
+2020-01-28,1760616414_3924617497_0,Banihal area and Ramban-Ramsu stretch,snow,full,medium,102.8,https://www.pressreader.com/india/hindustan-times-amritsar/20200129/281771336166272
+2020-03-27,2477018477_3924626150_0,Dalwas Ramban NH-44,landslide,full,medium,39.3,https://indianexpress.com/article/india/jammu-and-kashmir-27-houses-of-a-village-collapse-in-landslides-6337731/
+2020-04-05,2477017966_12734157829_0,Ramban district NH-44,landslide,full,low,21.1,https://thekashmirhorizon.com/2020/04/05/landslides-force-suspension-of-traffic-on-jammu-srinagar-highway-restored-later-road-open-to-supply-vehicles-only/
+2020-05-16,2477017705_2477017661_0,Cafeteria Morh Ramban NH-44,landslide,full,full,81.5,https://www.dailyexcelsior.com/2-killed-7-injured-9-vehicles-damaged-in-ramban-landslide/
+2020-05-21,9584203847_9584168042_0,Panthiyal Ramban NH-44,landslide,full,full,95.0,https://kashmirobserver.net/2020/05/21/landslides-close-highway-2000-vehicles-stranded/
+2020-08-13,2477018477_3924626150_0,Mehar Ramban NH-44,landslide,full,full,39.3,https://www.hindustantimes.com/cities/landslide-jammu-kashmir-highway-remains-blocked-for-second-day/story-cdvHHmvbIKVFA1fSsnCctJ.html
+2020-08-20,12734157829_2477018477_0,Marog–Monkey Morh–Battery Chashma–Panthiyal NH-44,landslide,full,medium,107.2,https://www.tribuneindia.com/news/j-k/jammu-srinagar-nh-closed-after-landslides-500-vehicles-stranded-129151
+2020-08-25,2477018477_3924626150_0,Dalwas Ramban NH-44,landslide,full,full,39.3,https://www.tribuneindia.com/news/j-k/massive-landslide-forces-closure-of-jammu-srinagar-national-highway-131167
+2020-11-23,2477017966_12734157829_0,Ramban district NH-44,landslide,full,low,21.1,https://www.business-standard.com/article/current-affairs/snow-landslides-lead-to-closure-of-jammu-srinagar-national-highway-120112300422_1.html
+2021-01-10,2477017966_12734157829_0,Kela Morh near Ramban NH-44,road_damage,full,full,21.1,https://www.ndtv.com/india-news/jammu-srinagar-highway-closed-after-road-patch-caves-in-near-ramban-2350672
+2021-02-27,1760616414_3924617497_0,Banihal area Ramban NH-44,landslide,full,medium,102.8,https://theins.in/2021/02/27/landslides-close-jammu-srinagar-highway/
+2021-03-03,1760616414_3924617497_0,Shabanbas Banihal NH-44,mudslide,full,medium,102.8,https://theins.in/2021/03/03/mudslide-closes-jammu-srinagar-highway/
+2021-03-23,9584203847_9584168042_0,Panthyal,landslide,unknown,medium,95.0,https://www.tribuneindia.com/news/j-k/snowfall-landslides-shut-jammu-and-kashmir-highway-300-vehicles-stranded-229343/amp
+2021-03-23,12734157829_2477018477_0,Maroog,landslide,unknown,medium,107.2,https://www.tribuneindia.com/news/j-k/snowfall-landslides-shut-jammu-and-kashmir-highway-300-vehicles-stranded-229343/amp
+2021-03-23,2477017705_2477017661_0,Cafeteria Morh,landslide,unknown,medium,81.5,https://www.tribuneindia.com/news/j-k/snowfall-landslides-shut-jammu-and-kashmir-highway-300-vehicles-stranded-229343/amp
+2021-03-23,2477018477_3924626150_0,Digdole,landslide,unknown,medium,39.3,https://www.tribuneindia.com/news/j-k/snowfall-landslides-shut-jammu-and-kashmir-highway-300-vehicles-stranded-229343/amp
+2021-04-17,2477017705_2477017661_0,Cafeteria Morh,landslide,full,medium,81.5,https://www.pressreader.com/india/kashmir-observer/20210418/281500754083396
+2021-04-17,2477018477_3924626150_0,Digdol,landslide,full,medium,39.3,https://www.pressreader.com/india/kashmir-observer/20210418/281500754083396
+2021-04-17,9584203847_9584168042_0,Panthyal,landslide,full,medium,95.0,https://www.pressreader.com/india/kashmir-observer/20210418/281500754083396
+2021-07-10,2477018477_3924626150_0,Magerkote Ramsoo Ramban NH-44,landslide,full,medium,39.3,https://www.newindianexpress.com/nation/2021/jul/10/jk-national-highway-closed-as-rains-trigger-massive-landslide-2328210.html
+2021-07-11,2477018477_3924626150_0,Magerkote Ramsoo Ramban NH-44,landslide,full,medium,39.3,https://www.indiatoday.in/india/story/landslides-block-jammu-srinagar-highway-truck-drivers-left-stranded-1826697-2021-07-11
+2021-09-24,9584203847_9584168042_0,Panthyal,landslide,full,low,95.0,https://dailyexcelsior.com/landslide-hits-jammu-srinagar-highway-traffic-stopped/
+2021-10-23,2477017966_12734157829_0,Kela Morh–Moumpassi Ramban NH-44,mudslide,full,medium,21.1,https://kashmirobserver.net/2021/10/23/450-vehicles-stranded-on-banihal-highway/
+2021-10-23,2477017705_2477017661_0,Cafeteria Morh Ramban NH-44,landslide,full,full,81.5,https://www.indiatoday.in/amp/india/story/jammu-kashmir-season-first-snowfall-srinagar-highway-blocked-landslides-1868586-2021-10-23
+2022-01-07,9584203847_9584168042_0,Panthiyal–Maroog Ramban NH-44,landslide,full,medium,95.0,https://www.ndtv.com/india-news/jammu-srinagar-national-highway-reopens-after-three-days-2699124
+2022-03-03,1760616414_3924617497_0,Shabanbas near Banihal NH-44,landslide,full,medium,102.8,https://www.tribuneindia.com/news/j-k/landslide-in-ramban-district-blocks-jammu-srinagar-highway-for-4-hrs-374874
+2022-03-10,1760616414_3924617497_0,Nachlana between Banihal and Ramban NH-44,landslide,full,medium,102.8,https://www.indiatoday.in/india/story/landslide-on-jammu-srinagar-national-highway-vehicular-traffic-resumes-1923832-2022-03-10
+2022-05-19,2477018477_3924626150_0,Khooni Nallah near Makerkote Ramban NH-44,landslide,full,low,39.3,https://www.pib.gov.in/Pressreleaseshare.aspx?PRID=1827316
+2022-06-22,2477017966_12734157829_0,Ramban district NH-44,landslide,full,medium,21.1,https://indianexpress.com/article/cities/jammu/road-connectivity-kashmir-national-highways-blocked-landslides-7983769/
+2022-07-21,2477018477_3924626150_0,Mehar near cafeteria stretch,landslide,full,medium,39.3,https://www.tribuneindia.com/news/j-k/1k-vehicles-stuck-in-ramban-as-landslides-block-highway-414532
+2022-07-21,9584203847_9584168042_0,Panthyal,landslide,full,medium,95.0,https://www.tribuneindia.com/news/j-k/1k-vehicles-stuck-in-ramban-as-landslides-block-highway-414532
+2022-08-05,2477017705_2477017661_0,Cafeteria Morh,shooting_stones,unknown,medium,81.5,https://www.tribuneindia.com/news/j-k/landslide-forces-closure-of-jammu-srinagar-highway-419359
+2022-08-05,2477018477_3924626150_0,Mehaar,shooting_stones,unknown,medium,39.3,https://www.tribuneindia.com/news/j-k/landslide-forces-closure-of-jammu-srinagar-highway-419359
+2022-08-24,2477017705_2477017661_0,Mehad–Cafeteria Morh Ramban NH-44,landslide,full,medium,81.5,https://www.oneindia.com/jammu/jammu-srinagar-nh-closed-for-vehicular-traffic-amidst-multiple-landslides-shooting-stones-3452264.html
+2022-09-07,12740141132_2671393250_0,Riha Padi Banhal area,landslide,full,medium,40.5,https://etvbharat.com/english/bharat/srinagar-jammu-highway-blocked-due-to-landslides/na20220907125343183183093
+2022-09-07,2477018477_3924626150_0,Mehad,landslide,full,medium,39.3,https://etvbharat.com/english/bharat/srinagar-jammu-highway-blocked-due-to-landslides/na20220907125343183183093
+2022-11-19,13645861672_2477017934_0,Chamba Seri Ramban NH-44,landslide,full,medium,88.7,https://jkalerts.com/jammu-kashmir-news/jammu-srinagar-nhw-traffic-update-21-nov-2022/
+2023-01-16,9584203847_9584168042_0,Panthyal,landslide,unknown,medium,95.0,https://www.tribuneindia.com/news/j-k/jammu-srinagar-national-highway-closed-due-to-landslide-in-ramban-470923
+2023-01-30,1760616414_3924617497_0,Between Chanderkote and Banihal,landslide,full,medium,102.8,https://www.tribuneindia.com/news/j-k/j-k-highway-closed-for-second-consecutive-day-due-to-landslide-in-ramban-475320
+2023-01-31,1760616414_3924617497_0,Between Chanderkote and Banihal,landslide,full,medium,102.8,https://www.tribuneindia.com/news/j-k/j-k-highway-closed-for-second-consecutive-day-due-to-landslide-in-ramban-475320
+2023-02-01,1760616414_3924617497_0,Rampari Wagan Banihal NH-44,mudslide,full,medium,102.8,https://www.indiatoday.in/india/story/landslide-blocks-national-highway-44-jammu-kashmir-2328958-2023-02-01
+2023-02-20,1760616414_3924617497_0,Sher Bibi Banihal NH-44,landslide,full,medium,102.8,https://kashmirreader.com/2023/02/22/landslide-blocks-jmu-sgr-highway/
+2023-04-27,1760616414_3924617497_0,Shalgari near Banihal,landslide,unknown,medium,102.8,https://www.tribuneindia.com/news/j-k/jammu-srinagar-national-highway-closed-after-landslide-over-300-vehicles-stranded-501466
+2023-06-26,2477018477_3924626150_0,Mehar Ramban NH-44,landslide,full,medium,39.3,https://timesofindia.indiatimes.com/city/jammu/jammu-srinagar-national-highway-mughal-road-closed-for-traffic-due-to-landslides-nh-partially-restored/articleshow/101285821.cms
+2023-07-08,9584203847_9584168042_0,Panthiyal Tunnel–Chamba Seeri Ramban NH-44,road_damage,full,medium,95.0,https://www.ndtv.com/india-news/jammu-srinagar-national-highway-closed-due-to-landslide-4190240
+2023-07-10,13645861672_2477017934_0,Panthiyal Tunnel–Chamba Seeri Ramban NH-44,road_damage,full,medium,88.7,https://newsonair.gov.in/jammu-srinagar-national-highway-nh44-closes-for-vehicular-traffic-today/
+2023-07-19,2477017705_2477017661_0,Cafeteria Morh Ramban NH-44,landslide,full,high,81.5,https://newsonair.gov.in/jk-jammu-srinagar-national-highway-closed-for-vehicular-traffic-in-wee-hours-today/
+2023-07-22,2477018477_3924626150_0,Mehad–Delwas–T2 Tunnel Ramban NH-44,landslide,full,medium,39.3,https://newsonair.gov.in/jammu-srinagar-national-highway-closes-for-vehicular-traffic/
+2023-08-08,12734157829_2477018477_0,T2 near Maroog,shooting_stones,partial,medium,107.2,https://www.greaterkashmir.com/uncategorized/shooting-stones-briefly-disrupt-traffic-on-sgr-jmu-nh
+2023-09-12,1760616414_3924617497_0,Kishtwari Pather Chamalwas Banihal NH-44,landslide,full,medium,102.8,https://newsonair.gov.in/jk-4-persons-died-after-truck-buried-in-massive-landslide-on-nh44/
+2023-11-10,2477017966_12734157829_0,Ramban district NH-44,mudslide,full,medium,21.1,https://www.hindustantimes.com/cities/chandigarh-news/landslides-in-ramban-jammu-srinagar-highway-closed-for-over-10-hours-after-snowfall-101699639134820.html
+2024-02-01,2477018477_3924626150_0,Sherbibi–Magerkote–Mehad Cafeteria–Dalwas Ramban NH-44,landslide,full,medium,39.3,https://www.ndtv.com/india-news/jammu-srinagar-national-highway-remains-closed-400-vehicles-stranded-4978456
+2024-02-19,2477017966_12734157829_0,Ramban–Banihal NH-44,landslide,full,medium,21.1,https://indianexpress.com/article/india/jammu-srinagar-highway-blocked-landslides-9170636/lite/
+2024-03-02,2477018477_3924626150_0,Dalwas–Ramban–Banihal NH-44,landslide,full,medium,39.3,https://news.abplive.com/news/srinagar-jammu-national-highway-closed-for-second-day-due-to-landslides-restoration-work-in-progress-1669106
+2024-03-13,1760616414_3924617497_0,Nashri–Banihal NH-44,landslide,full,low,102.8,https://jkalerts.com/jammu-kashmir-news/jammu-srinagar-nhw-traffic-update-15-march-2024/
+2024-03-30,2477017705_2477017661_0,Kishtwari Pather–Mehar Cafeteria Morh Ramban NH-44,landslide,full,high,81.5,https://www.ndtv.com/india-news/landslides-triggered-by-rains-block-jammu-srinagar-national-highway-5346511
+2024-04-20,1760616414_3924617497_0,Hingni Banihal NH-44,road_damage,full,low,102.8,https://jkalerts.com/jammu-kashmir-notifications/jammu-srinagar-nhw-traffic-update-22-april-2024/
+2024-04-22,2477017966_12734157829_0,Gangroo Ramban NH-44,landslide,full,low,42.9,https://www.hindustantimes.com/india-news/jammusrinagar-national-highway-blocked-for-traffic-after-landslide-101713771310472.html
+2024-04-29,2477017705_2477017661_0,Mehar–Gangroo–Mom Passi–Kishtwari Pather Ramban NH-44,landslide,full,medium,81.5,https://newsonair.gov.in/jammu-srinagar-highway-closed-by-landslides-mughal-road-shut-due-to-snowfall/
+2024-06-03,2477017966_12734157829_0,Ramban–Banihal NH-44,maintenance_closure,full,medium,21.1,https://theprint.in/india/traffic-to-remain-suspended-tonight-on-jammu-srinagar-highway-for-repairs/2114023/
+2024-08-11,2477018477_3924626150_0,Mehad Cafeteria Ramban NH-44,mudslide,full,medium,39.3,https://www.babushahi.com/full-news.php?headline=Traffic-restored-on-Jammu-Srinagar-National-Highway&id=189301
+2025-01-28,2477017966_12734157829_0,Ramban district NH-44,medium,full,landslide,21.1,https://thekashmiriyat.net/traffic-stopped-on-jammu-srinagar-national-highway-due-to-landslide-in-ramban/
+2025-02-20,1760616414_3924617497_0,Banihal–Ramsoo,snowfall,full,medium,102.8,https://www.newsonair.gov.in/2-way-traffic-restored-on-jammu-srinagar-nh44-after-heavy-snowfall/
+2025-02-27,2477017966_12734157829_0,Ramban district NH-44,low,full,landslide,21.1,https://www.hindustantimes.com/cities/chandigarh-news/traffic-on-jammu-srinagar-highway-restored-partially-101740853814872.html
+2025-03-03,2477018477_3924626150_0,Mehad,landslide,unknown,medium,39.3,https://www.newsonair.gov.in/jk-landslide-in-ramban-closes-jammu-srinagar-nh-amid-heavy-rainfall
+2025-04-20,9584203847_9584168042_0,Nashri to Banihal; Panthiyal section swept away,flood,full,medium,95.0,https://businesstoday.in/india/story/jk-flash-floods-trigger-chaos-in-ramban-homes-damaged-highway-cut-off-3-dead-472739-2025-04-20
+2025-04-21,2477017966_12734157829_0,Ramban district NH-44,full,0.9,landslide,21.1,Cloudburst-related landslides caused a prolonged closure; treat as the same April 20 episode if the affected locations overlap
+2025-05-02,13645861672_2477017934_0,Chamba Seri Ramban NH-44,full,0.9,mudslide,88.7,Heavy rain and hailstorms triggered mudslides blocking the highway at Chamba Seri
+2025-05-08,2477017966_12734157829_0,Ramban district NH-44,full,0.6,landslide,21.1,Rain-induced mudslides and shooting stones blocked the highway; hundreds of vehicles stranded
+2025-08-18,12732441814_12740141132_0,Monkey Morh,landslide,full,medium,13.3,https://www.theweek.in/wire-updates/national/2025/08/18/des8-jk-highway.html
+2025-08-18,12734157829_2477018477_0,Maroog,landslide,full,medium,107.2,https://www.theweek.in/wire-updates/national/2025/08/18/des8-jk-highway.html
+2025-08-26,2477017966_12734157829_0,Udhampur–Ramban NH-44,full,0.89,landslide,21.1,Multiple rain-triggered landslides blocked several locations; closure continued for multiple days
+2025-10-07,2477017966_12734157829_0,NH-44 multiple locations Jammu and Kashmir,full,0.9,landslide,21.1,Highway closed due to landslides and mudslides at multiple locations; road reported unsafe for travel
+2026-07-31,1760616414_3924617497_0,Jakheni Udhampur–Navyug Tunnel Banihal NH-44,maintenance_closure,1,low,102.8,https://newsonair.gov.in/jammu-srinagar-national-highway-closed-today-for-restoration-works/
+2026-10-07,9584203847_9584168042_0,Monkey Morh,landslide,unknown,low,247.9,https://newsonair.gov.in/jammu-srinagar-national-highway-blocked-due-to-landslides/
+2026-10-08,9584203847_9584168042_0,Monkey Morh,landslide,unknown,low,247.9,https://newsonair.gov.in/jammu-srinagar-national-highway-cleared-for-vehicular-movement-after-restoration-works/
