@@ -16,9 +16,9 @@ Bounding box: latitude 33.211 to 33.475, longitude 75.161 to 75.262 (about 25 km
 | Week 2A | `week2a_download_weather.py` | Downloads ERA5-Land weather data for the corridor | `data/weather/*.nc` (not in Git) |
 | Week 2B | `week2b_process_weather.py` | Turns the weather files into daily values per road segment | `data/weather_daily_by_segment.csv` (not in Git) |
 | Week 2C | `week2c_fill_from_candidates.py` | Builds `data/disruption_log.csv` from reported events in `data/disruption_candidates.csv`, using hand-checked coordinates from `data/place_coordinates.csv` first, then place-name lookup | `data/disruption_log.csv` |
-| Week 2C | `week2c_disruption_log.py` | Snaps each event to the nearest road segment and maps them | `data/disruption_log_snapped.csv`, `data/events_map.png` |
+| Week 2C | `week2c_disruption_log.py` | Snaps each event to the nearest road segment and maps them | `data/disruption_log_snapped.csv`, `data/labelled_events.csv`, `data/events_map.png`|
 | Week 3 | `week3_create_db.py`, `week3_offline_schema.sql` | Creates the local database from the schema | `data/routewise_local.db` (not in Git) |
-| Week 4 | `week4_build_dataset.py` | Builds the modelling dataset | see script *(describe the output here)* |
+| Week 4 | `week4_build_dataset.py` | Builds the modelling dataset: static features per road segment, the segment adjacency graph, and labelled segment-days split by time into train (2021-2022), val (2023) and test (2024-2025) | `data/segment_static.csv`, `data/segment_adjacency.csv`, `data/training_samples.csv` |
 
 ## Setup
 
@@ -52,7 +52,7 @@ To add events:
 2. If the place isn't found automatically, add a line to `data/place_coordinates.csv` in the form `keyword,lat,lon`. Get the coordinates from Google Maps (right-click the spot on NH-44). The first matching keyword wins, so list specific names above general ones.
 3. Run `week2c_fill_from_candidates.py`, then `week2c_disruption_log.py`.
 
-Each event in `disruption_log_snapped.csv` gets an `edge_id` (the road segment), a `snap_dist_m` (distance to that segment in meters) and a `snap_ok` flag (`True` when the event is within 1.5 km of a road).
+Each event in `disruption_log_snapped.csv` gets a `segment_id` (the road segment, written as `u_v_k`), a `snap_dist_m` (distance to that segment in meters) and a `snap_ok` flag (`True` when the event is within 1.5 km of a road). `labelled_events.csv` keeps only the `snap_ok` events and is the input to Week 4. Only events from 2021 to 2025 (the weather window) can be used as training labels.
 
 ## Limitations
 
