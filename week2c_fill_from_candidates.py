@@ -2,24 +2,14 @@
 Week 2C helper: fill data/disruption_log.csv from data/disruption_candidates.csv
 ------------------------------------------------------------------------------------
 data/disruption_candidates.csv holds REAL reported events (each with a source URL).
-This script looks up coordinates for the place names (OpenStreetMap Nominatim via
-OSMnx), keeps only results that fall inside your Week 1 corridor, and merges the
-rows into data/disruption_log.csv without touching rows you already added.
+Coordinates come from your hand-checked data/place_coordinates.csv (keyword,lat,lon)
+first, then from OpenStreetMap place-name lookup. Only results that fall inside your
+Week 1 corridor are kept.
 
 Run (venv active, internet on):
     python week2c_fill_from_candidates.py
-
 Then:
     python week2c_disruption_log.py
-
-IMPORTANT, be honest about what this does:
-  * Coordinates come from place-name lookup, so they are APPROXIMATE (village centre,
-    not the exact slide). Every such row is marked location_confidence = low.
-  * Places OSM does not know (for example "Cafeteria Morh") use the fallback place
-    in the CSV, or end up in data/needs_manual_coordinates.csv for you to look up
-    on Google Maps and type in.
-  * Rows whose notes start with "CHECK DATE" were inferred from an article's
-    "Saturday"/"Tuesday" wording. Open the link and confirm the date before training.
 """
 import os
 import time
@@ -31,6 +21,7 @@ CANDIDATES = "data/disruption_candidates.csv"
 LOG_PATH = "data/disruption_log.csv"
 MANUAL_PATH = "data/needs_manual_coordinates.csv"
 REPORT_PATH = "data/geocode_report.csv"
+PLACES_PATH = "data/place_coordinates.csv"  # YOUR hand-checked coordinates (Google Maps)
 
 # Week 1 corridor box plus a margin
 NORTH, SOUTH, EAST, WEST = 33.475, 33.211, 75.262, 75.161
@@ -58,6 +49,26 @@ def lookup(query):
         return None
 
 
+def load_places():
+    """Hand-checked coordinates: rows with keyword,lat,lon (blank lat/lon = skipped)."""
+    if not os.path.exists(PLACES_PATH):
+        return []
+    df = pd.read_csv(PLACES_PATH)
+    places = []
+    for _, p in df.iterrows():
+        if pd.notna(p["lat"]) and pd.notna(p["lon"]):
+            places.append((str(p["keyword"]).strip().lower(), float(p["lat"]), float(p["lon"])))
+    return places
+
+
+def match_place(places, desc):
+    d = str(desc).lower()
+    for kw, lat, lon in places:
+        if kw in d:
+            return kw, lat, lon
+    return None
+
+
 def main():
     if not os.path.exists(CANDIDATES):
         raise SystemExit(f"{CANDIDATES} not found. Put the candidates file in the data folder.")
@@ -66,10 +77,18 @@ def main():
 
     cache = {}
     new_rows, report, manual = [], [], []
+    places = load_places()
+    print(f"Using {len(places)} hand-checked places from {PLACES_PATH}" if places
+          else f"No filled-in {PLACES_PATH} yet; using place-name lookup only.")
 
     for _, r in cand.iterrows():
-        got, used = None, ""
+        got, used, by_hand = None, "", False
+        hit = match_place(places, r["location_desc"])
+        if hit:
+            got, used, by_hand = (hit[1], hit[2]), f"hand-checked: {hit[0]}", True
         for label, query in (("primary", r["geocode_query"]), ("fallback", r["fallback_query"])):
+            if by_hand:
+                break
             if query in cache:
                 res = cache[query]
             else:
@@ -91,7 +110,12 @@ def main():
         }
         if got:
             row["lat"], row["lon"] = round(got[0], 5), round(got[1], 5)
-            row["notes"] = (row["notes"] + "; " if row["notes"] else "") + "coordinates approximate (place-name lookup)"
+            if by_hand:
+                row["location_confidence"] = "medium"
+                tag = "coordinates from Google Maps place lookup"
+            else:
+                tag = "coordinates approximate (place-name lookup, may be town centre only)"
+            row["notes"] = (row["notes"] + "; " if row["notes"] else "") + tag
             new_rows.append(row)
             report.append({"location_desc": r["location_desc"], "query": used,
                            "result": f"{got[0]:.4f},{got[1]:.4f}", "status": "ok"})
@@ -102,15 +126,18 @@ def main():
 
     pd.DataFrame(report).to_csv(REPORT_PATH, index=False)
 
-    # Merge with the existing log (keep the user's own rows, skip duplicates)
+    # Merge with the existing log (keep the user's own rows)
     if os.path.exists(LOG_PATH):
         log = pd.read_csv(LOG_PATH)
         log = log[log["location_desc"] != "EXAMPLE_DELETE_ME"]
     else:
         log = pd.DataFrame(columns=LOG_COLUMNS)
     key = lambda d: (str(d["date"]), str(d["location_desc"]), str(d["source_url"]))
-    have = {key(x) for _, x in log.iterrows()}
-    fresh = [r for r in new_rows if key(r) not in have]
+    # Re-running replaces rows created earlier from these candidates (so improved
+    # coordinates overwrite the old town-centre ones). Rows you added yourself stay.
+    cand_keys = {key(r) for _, r in cand.iterrows()}
+    log = log[[key(x) not in cand_keys for _, x in log.iterrows()]]
+    fresh = new_rows
     merged = pd.concat([log, pd.DataFrame(fresh, columns=LOG_COLUMNS)], ignore_index=True)
     merged = merged.sort_values("date").reset_index(drop=True)
     merged.to_csv(LOG_PATH, index=False)
@@ -118,7 +145,7 @@ def main():
     if manual:
         pd.DataFrame(manual, columns=LOG_COLUMNS).to_csv(MANUAL_PATH, index=False)
 
-    print(f"Added {len(fresh)} rows to {LOG_PATH} ({len(new_rows) - len(fresh)} already present).")
+    print(f"Wrote {len(fresh)} candidate rows into {LOG_PATH} (your own extra rows kept).")
     print(f"{len(manual)} rows need coordinates by hand -> {MANUAL_PATH}" if manual
           else "Every row got coordinates.")
     print(f"Lookup details -> {REPORT_PATH}")
