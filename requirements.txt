@@ -1,0 +1,17 @@
+# RouteWise - Core Dependencies
+
+# PyTorch CPU (minimal runtime for local inference without CUDA bloat)
+# Install with: pip install torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+
+# Evaluation, thresholding and metrics
+scikit-learn==1.9.1
+
+# Automated unit testing
+pytest==9.1.1
+
+# FastAPI Backend Foundation
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+httpx==0.28.1

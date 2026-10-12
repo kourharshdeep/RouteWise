@@ -27,3 +27,7 @@ Thumbs.db
 
 # SQL offline Database
 *.db
+
+# Node.js dependencies and build output
+node_modules/
+dist/
