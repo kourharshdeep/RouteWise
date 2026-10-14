@@ -45,3 +45,55 @@ def test_get_corridor_segments_geojson() -> None:
     assert "slope" in props
     assert "elevation_m" in props
     assert props["length_m"] > 0
+
+
+def test_get_segment_features_drawer() -> None:
+    """Verifies that /api/v1/corridor/segments/{id}/features returns genuine input features."""
+    seg_id = "447079837_1077082205_0"
+    res = client.get(f"/api/v1/corridor/segments/{seg_id}/features?date=2023-07-09")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["segment_id"] == seg_id
+    assert data["date"] == "2023-07-09"
+    assert data["length_m"] > 0
+    assert data["slope_deg"] >= 0
+    assert "Input features" in data["disclaimer"]
+    assert data["weather"] is not None
+    assert data["weather"]["precip_mm"] >= 0
+    assert "ERA5-Land" in data["weather"]["data_source"]
+
+
+def test_get_along_route_services() -> None:
+    """Verifies along-route facilities endpoint."""
+    res = client.get("/api/v1/corridor/services")
+    assert res.status_code == 200
+    services = res.json()
+    assert len(services) >= 5
+    types = {s["type"] for s in services}
+    assert "hospital" in types
+    assert "police" in types
+    assert "fuel" in types
+    assert all("source" in s and "verified" in s for s in services)
+
+
+def test_get_official_advisories() -> None:
+    """Verifies config-driven official traffic police contacts card."""
+    res = client.get("/api/v1/corridor/advisories")
+    assert res.status_code == 200
+    data = res.json()
+    assert "Traffic Police" in data["authority"]
+    assert "official traffic advisories are the authority" in data["disclaimer"]
+    assert len(data["control_units"]) >= 3
+    unit_names = [u["unit"] for u in data["control_units"]]
+    assert any("Ramban" in n for n in unit_names)
+
+
+def test_get_corridor_weather() -> None:
+    """Verifies corridor weather snapshot for historical date."""
+    res = client.get("/api/v1/corridor/weather?date=2023-07-09")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_segments_covered"] == 151
+    assert data["max_precipitation_mm"] >= 0
+    assert "segments" in data
+

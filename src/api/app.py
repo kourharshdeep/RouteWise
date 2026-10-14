@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.config import settings
-from src.api.routes import corridor, health, risk
+from src.api.routes import auth, chat, corridor, disruptions, health, journey, reports, risk
 
 
 def create_app() -> FastAPI:
@@ -33,8 +33,13 @@ def create_app() -> FastAPI:
 
     # 2. Register modular routers
     app.include_router(health.router, prefix=settings.api_prefix)
+    app.include_router(auth.router, prefix=settings.api_prefix)
+    app.include_router(reports.router, prefix=settings.api_prefix)
     app.include_router(risk.router, prefix=settings.api_prefix)
     app.include_router(corridor.router, prefix=settings.api_prefix)
+    app.include_router(journey.router, prefix=settings.api_prefix)
+    app.include_router(disruptions.router, prefix=settings.api_prefix)
+    app.include_router(chat.router, prefix=settings.api_prefix)
 
     @app.get("/", tags=["Root"])
     def root() -> JSONResponse:

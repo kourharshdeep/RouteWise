@@ -1,0 +1,101 @@
+[
+  {
+    "id": "dh_ramban",
+    "name": "District Hospital Ramban",
+    "type": "hospital",
+    "lat": 33.2435,
+    "lon": 75.241,
+    "source": "Directorate of Health Services Jammu / OpenStreetMap",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "24x7 trauma care facility and emergency surgical unit."
+  },
+  {
+    "id": "sdh_banihal",
+    "name": "Emergency Hospital (SDH) Banihal",
+    "type": "hospital",
+    "lat": 33.4862,
+    "lon": 75.2012,
+    "source": "Directorate of Health Services Jammu / OpenStreetMap",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "Sub-district emergency care before Jawahar Tunnel / Navyug Tunnel."
+  },
+  {
+    "id": "phc_chanderkot",
+    "name": "Primary Health Centre (PHC) Chanderkot",
+    "type": "hospital",
+    "lat": 33.2105,
+    "lon": 75.289,
+    "source": "Directorate of Health Services Jammu",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "First aid, triage and ambulance dispatch."
+  },
+  {
+    "id": "ps_ramban",
+    "name": "Police Station Ramban & TCU",
+    "type": "police",
+    "lat": 33.241,
+    "lon": 75.2395,
+    "source": "J&K Police Department Directory",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "Traffic Control Unit (TCU) monitoring center."
+  },
+  {
+    "id": "ps_banihal",
+    "name": "Police Station Banihal",
+    "type": "police",
+    "lat": 33.4815,
+    "lon": 75.1985,
+    "source": "J&K Police Department Directory",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "Northern corridor control post and convoy staging."
+  },
+  {
+    "id": "fuel_chanderkot",
+    "name": "Indian Oil Fuel Station Chanderkot",
+    "type": "fuel",
+    "lat": 33.208,
+    "lon": 75.2915,
+    "source": "OpenStreetMap Indian Oil Retail Outlet Directory",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "Diesel and petrol available; heavy commercial truck bay."
+  },
+  {
+    "id": "fuel_seri",
+    "name": "HP Petrol Pump Seri",
+    "type": "fuel",
+    "lat": 33.2725,
+    "lon": 75.227,
+    "source": "OpenStreetMap Retail Directory",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "Mid-corridor fuel station with tyre pressure service."
+  },
+  {
+    "id": "fuel_banihal",
+    "name": "Banihal Highway Fuel Station",
+    "type": "fuel",
+    "lat": 33.475,
+    "lon": 75.196,
+    "source": "OpenStreetMap Retail Directory",
+    "verified": true,
+    "last_checked": "2026-10-10",
+    "notes": "High-altitude fuel dispensing with DEF fluid for trucks."
+  },
+  {
+    "id": "mechanic_ramsu",
+    "name": "Ramsu Heavy Recovery & Workshop",
+    "type": "mechanic",
+    "lat": 33.376,
+    "lon": 75.1945,
+    "source": "Local NHAI Recovery Post Listing (Demo placeholder)",
+    "verified": false,
+    "last_checked": "2026-10-10",
+    "notes": "Crane and towing aid for stranded axle breakdowns. Call TCU first."
+  }
+]
