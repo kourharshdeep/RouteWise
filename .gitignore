@@ -31,3 +31,6 @@ Thumbs.db
 # Node.js dependencies and build output
 node_modules/
 dist/
+
+# Uploaded incident media
+data/uploads/
