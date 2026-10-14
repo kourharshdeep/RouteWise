@@ -1,16 +1,15 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle, Info, ShieldAlert } from 'lucide-react';
+import sortedSegmentIds from '../data/corridorSegmentsSorted.json';
 
 const LANDMARKS = [
-  { index: 0, name: 'Dewal', chainage: 'Km 0' },
-  { index: 22, name: 'Cafeteria Morh', chainage: 'Km 5.4' },
-  { index: 41, name: 'Ramban', chainage: 'Km 10.2' },
-  { index: 65, name: 'Seri', chainage: 'Km 16.0' },
-  { index: 88, name: 'Maroog', chainage: 'Km 21.5' },
-  { index: 110, name: 'Digdol', chainage: 'Km 26.8' },
-  { index: 132, name: 'Ramsu', chainage: 'Km 31.4' },
-  { index: 150, name: 'Banihal', chainage: 'Km 36.0' },
+  { index: 0, name: 'Chanderkot', chainage: 'Km 0' },
+  { index: 26, name: 'Cafeteria Morh', chainage: 'Km 5.4' },
+  { index: 44, name: 'Ramban', chainage: 'Km 10.2' },
+  { index: 51, name: 'Digdol', chainage: 'Km 21.5' },
+  { index: 79, name: 'Ramsu', chainage: 'Km 31.4' },
+  { index: 140, name: 'Banihal', chainage: 'Km 36.0' },
 ];
 
 export default function CorridorStrip({
@@ -22,11 +21,15 @@ export default function CorridorStrip({
   const { t } = useTranslation();
   const stripRef = useRef(null);
 
-  const segments = riskData?.segments || [];
-  const riskLookup = {};
-  segments.forEach((s) => {
-    riskLookup[s.segment_id] = s;
-  });
+  // Monotonically ordered segments from South (Chanderkot/Ramban) to North (Banihal)
+  const segments = useMemo(() => {
+    const raw = riskData?.segments || [];
+    const lookup = {};
+    raw.forEach((s) => {
+      lookup[s.segment_id] = s;
+    });
+    return sortedSegmentIds.map((id) => lookup[id] || { segment_id: id, risk_score: 0, risk_tier: 'Low' });
+  }, [riskData]);
 
   const handleKeyDown = (e, idx) => {
     if (e.key === 'ArrowRight' && idx < segments.length - 1) {

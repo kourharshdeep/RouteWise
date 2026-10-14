@@ -82,6 +82,23 @@ function DashboardLayout({
     window.location.reload();
   };
 
+  const handleSelectSegment = (segOrId) => {
+    if (!segOrId) {
+      setSelectedSegment(null);
+      return;
+    }
+    if (typeof segOrId === "string") {
+      const feat = geojson?.features?.find((f) => f.id === segOrId);
+      if (feat) {
+        setSelectedSegment(feat);
+      } else {
+        setSelectedSegment({ id: segOrId, properties: {} });
+      }
+    } else {
+      setSelectedSegment(segOrId);
+    }
+  };
+
   // Derive active tab from pathname
   const currentPath = location.pathname.replace(/^\//, "") || "overview";
 
@@ -161,6 +178,9 @@ function DashboardLayout({
                   health={health}
                   riskData={riskData}
                   selectedDate={selectedDate}
+                  selectedSegment={selectedSegment}
+                  onSelectSegment={handleSelectSegment}
+                  geojson={geojson}
                   onNavigate={(tab) => navigate(`/${tab}`)}
                 />
               }
@@ -186,7 +206,7 @@ function DashboardLayout({
                       geojson={geojson}
                       riskData={riskData}
                       selectedDate={selectedDate}
-                      onSelectSegment={setSelectedSegment}
+                      onSelectSegment={handleSelectSegment}
                       selectedSegmentId={selectedSegment?.id}
                       theme={theme}
                     />
@@ -200,6 +220,8 @@ function DashboardLayout({
                       <SegmentInspector
                         selectedSegment={selectedSegment}
                         riskData={riskData}
+                        selectedDate={selectedDate}
+                        geojson={geojson}
                       />
                     </div>
                   </div>

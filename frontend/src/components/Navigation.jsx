@@ -164,16 +164,27 @@ export default function Navigation({ theme, setTheme, health }) {
       {/* Sidebar Footer: User / Language / Theme Toggle */}
       <div className="sidebar-footer">
         <div className="sidebar-actions-row">
-          {/* Language Switcher */}
-          <button
-            type="button"
-            className="lang-toggle-btn"
-            onClick={toggleLanguage}
-            title="Switch Language (English / Hindi)"
-          >
-            <Globe size={14} />
-            <span>{i18n.language === 'hi' ? 'EN' : 'हिन्दी'}</span>
-          </button>
+          {/* Polished English / हिन्दी Segmented Toggle */}
+          <div className="lang-segmented-control" role="group" aria-label="Language selection">
+            <button
+              type="button"
+              className={`lang-segment-btn ${i18n.language !== 'hi' ? 'active' : ''}`}
+              onClick={() => changeLanguage('en')}
+              aria-pressed={i18n.language !== 'hi'}
+              title="Switch to English"
+            >
+              English
+            </button>
+            <button
+              type="button"
+              className={`lang-segment-btn ${i18n.language === 'hi' ? 'active' : ''}`}
+              onClick={() => changeLanguage('hi')}
+              aria-pressed={i18n.language === 'hi'}
+              title="हिन्दी में बदलें"
+            >
+              हिन्दी
+            </button>
+          </div>
 
           {/* Theme Switcher */}
           <label className="theme-switch" title="Toggle light/dark mode">

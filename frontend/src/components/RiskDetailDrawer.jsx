@@ -20,6 +20,7 @@ export default function RiskDetailDrawer({
   selectedDate,
   riskItem,
   onClose,
+  onNavigateToMap,
 }) {
   const { t } = useTranslation();
   const [featureData, setFeatureData] = useState(null);
@@ -243,6 +244,20 @@ export default function RiskDetailDrawer({
               </div>
             </>
           )}
+        </div>
+
+        {/* Drawer Footer with Map Navigation */}
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-default)', display: 'flex', justifyContent: 'flex-end', background: 'var(--bg-surface)' }}>
+          <button
+            type="button"
+            className="sample-btn"
+            onClick={() => {
+              if (onNavigateToMap) onNavigateToMap();
+              onClose();
+            }}
+          >
+            {t('inspector.view_on_map')} →
+          </button>
         </div>
       </div>
     </div>

@@ -4142,4 +4142,245 @@ body,
   cursor: not-allowed;
 }
 
+/* ==========================================================================
+   Basemap Tiles, Language Segmented Control, and Inspector Enhancements
+   ========================================================================== */
+
+/* OpenStreetMap Tile Layer Theming (No external API keys required) */
+.osm-tile-dark {
+  filter: brightness(0.68) invert(0.92) contrast(1.25) hue-rotate(185deg) saturate(0.35);
+}
+
+.osm-tile-light {
+  filter: none;
+}
+
+/* Sidebar Language Segmented Control */
+.lang-segmented-control {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+  width: 100%;
+}
+
+.lang-segment-btn {
+  flex: 1;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  text-align: center;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lang-segment-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--hover-bg);
+}
+
+.lang-segment-btn.active {
+  background-color: var(--accent-primary);
+  color: #ffffff !important;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Report Draft & Landmark Shortcuts */
+.draft-notice-banner {
+  background-color: var(--info-bg);
+  border: 1px solid var(--info-border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+.draft-notice-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-secondary);
+}
+
+.draft-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--info-border);
+  border-radius: 6px;
+  color: var(--accent-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.draft-clear-btn:hover {
+  background-color: var(--hover-bg);
+  border-color: var(--accent-secondary);
+}
+
+.landmark-shortcuts-row {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shortcuts-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.shortcuts-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shortcut-pill-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background-color: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shortcut-pill-btn:hover {
+  border-color: var(--accent-secondary);
+  color: var(--accent-secondary);
+  background-color: var(--hover-bg);
+}
+
+/* Map Notice and Inspector Enhancements */
+.map-retrospective-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background-color: var(--bg-surface-raised);
+  border-top: 1px solid var(--border-default);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.badge-verified {
+  background-color: var(--success-bg);
+  color: var(--success-text);
+  border: 1px solid var(--success-border);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.badge-unverified {
+  background-color: var(--warning-bg);
+  color: var(--warning-text);
+  border: 1px dashed var(--warning-border);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.inspector-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inspector-reports-mini-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.inspector-report-mini-item {
+  background-color: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-mini-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-mini-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.report-mini-date {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.inspector-note-dim {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.inspector-retrospective-banner {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background-color: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--warning-text);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.4;
+}
+
+
 

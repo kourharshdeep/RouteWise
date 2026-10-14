@@ -17,13 +17,28 @@ import RiskDetailDrawer from './RiskDetailDrawer';
 import OfficialAdvisoriesCard from './OfficialAdvisoriesCard';
 import AlongRouteServicesCard from './AlongRouteServicesCard';
 
-export default function Overview({ health, riskData, onNavigate, selectedDate }) {
+export default function Overview({
+  health,
+  riskData,
+  onNavigate,
+  selectedDate,
+  selectedSegment,
+  onSelectSegment,
+}) {
   const { t } = useTranslation();
   const isHealthy = health && health.status === 'ok';
   const summary = riskData?.summary;
   const [activeDrawerSegId, setActiveDrawerSegId] = useState(null);
 
-  const selectedRiskItem = riskData?.segments?.find((s) => s.segment_id === activeDrawerSegId);
+  const effectiveSelectedSegId = activeDrawerSegId || selectedSegment?.id || null;
+  const selectedRiskItem = riskData?.segments?.find((s) => s.segment_id === effectiveSelectedSegId);
+
+  const handleSelectSegment = (segId) => {
+    setActiveDrawerSegId(segId);
+    if (onSelectSegment) {
+      onSelectSegment(segId);
+    }
+  };
 
   return (
     <div className="overview-container">
@@ -75,8 +90,8 @@ export default function Overview({ health, riskData, onNavigate, selectedDate })
       <CorridorStrip
         riskData={riskData}
         selectedDate={selectedDate}
-        selectedSegmentId={activeDrawerSegId}
-        onSelectSegment={(segId) => setActiveDrawerSegId(segId)}
+        selectedSegmentId={effectiveSelectedSegId}
+        onSelectSegment={handleSelectSegment}
       />
 
       {/* Snapshot Cards Row */}
@@ -233,6 +248,7 @@ export default function Overview({ health, riskData, onNavigate, selectedDate })
           selectedDate={selectedDate}
           riskItem={selectedRiskItem}
           onClose={() => setActiveDrawerSegId(null)}
+          onNavigateToMap={() => onNavigate('map')}
         />
       )}
     </div>

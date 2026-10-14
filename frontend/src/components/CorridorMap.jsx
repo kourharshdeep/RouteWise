@@ -11,6 +11,7 @@ import {
 } from 'react-leaflet';
 import {
   AlertTriangle,
+  AlertCircle,
   Layers,
   Shield,
   CloudRain,
@@ -143,11 +144,10 @@ export default function CorridorMap({
   }, [riskData]);
 
   // Theme-adaptive Basemap Tiles
-  const tileUrl = isLight
-    ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+  // Standard supported OpenStreetMap basemap (requires no external API keys)
+  const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
   const tileAttribution =
-    '&copy; <a href="https://carto.com/" target="_blank" rel="noopener noreferrer">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>';
+    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
 
   // Read semantic color tokens dynamically from CSS properties
   const getStyleForSegment = (segId) => {
@@ -199,9 +199,9 @@ export default function CorridorMap({
       {/* Map Header with Layer Toggles */}
       <div className="map-header">
         <div>
-          <h2>NH-44 Highway Corridor Map (Ramban to Banihal)</h2>
+          <h2>{t('map.title')}</h2>
           <span className="map-header-sub">
-            Interactive Corridor Topology • 151 Monitored Segments • Click any segment or pin to inspect
+            {t('map.subtitle')}
           </span>
         </div>
 
@@ -214,7 +214,7 @@ export default function CorridorMap({
             title="Toggle ST-GNN Risk Heatmap"
           >
             <Shield size={13} />
-            <span>Risk Layer</span>
+            <span>{t('map.risk_layer')}</span>
           </button>
 
           <button
@@ -224,17 +224,17 @@ export default function CorridorMap({
             title="Toggle Field Incident Reports"
           >
             <AlertTriangle size={13} />
-            <span>Field Reports ({fieldReports.length})</span>
+            <span>{t('map.reports_layer')} ({fieldReports.length})</span>
           </button>
 
           <button
             type="button"
             className={`map-layer-btn ${showWeatherLayer ? 'active' : ''}`}
             onClick={() => setShowWeatherLayer(!showWeatherLayer)}
-            title="Toggle Historical Weather Rain Overlay (ERA5-Land)"
+            title={selectedDate ? "Toggle Historical Weather Rain Overlay (ERA5-Land)" : t('map.weather_disabled')}
           >
             <CloudRain size={13} />
-            <span>Weather Layer</span>
+            <span>{t('map.weather_layer')}</span>
           </button>
 
           <button
@@ -244,7 +244,7 @@ export default function CorridorMap({
             title="Toggle Along-Route Emergency & Fuel Facilities"
           >
             <MapPin size={13} />
-            <span>Services ({alongServices.length})</span>
+            <span>{t('map.services_layer')} ({alongServices.length})</span>
           </button>
         </div>
       </div>
@@ -272,12 +272,13 @@ export default function CorridorMap({
         >
           <MapController theme={theme} isDrawerOpen={isDrawerOpen} />
 
-          {/* Theme-Adaptive Leaflet Tile Layer */}
+          {/* Theme-Adaptive Leaflet Tile Layer (Standard OpenStreetMap with Dark Mode CSS Filter) */}
           <TileLayer
             key={`${theme}-${hasTileError ? 'err' : 'ok'}`}
             attribution={tileAttribution}
             url={tileUrl}
             maxZoom={19}
+            className={isLight ? 'osm-tile-light' : 'osm-tile-dark'}
             eventHandlers={{
               tileerror: () => setHasTileError(true),
             }}
@@ -315,7 +316,7 @@ export default function CorridorMap({
                     positions={leafletPositions}
                     pathOptions={style}
                     eventHandlers={{
-                      click: () => onSelectSegment(segId),
+                      click: () => onSelectSegment(feature),
                     }}
                   >
                     <Tooltip sticky className="map-segment-tooltip">
@@ -341,7 +342,7 @@ export default function CorridorMap({
               const isVerified = rep.status === 'verified' || rep.status === 'assigned';
               const markerColor = isVerified
                 ? (isLight ? '#dc2626' : '#ef4444')
-                : (isLight ? '#f59e0b' : '#fbbf24');
+                : (isLight ? '#d97706' : '#f59e0b');
 
               return (
                 <CircleMarker
@@ -359,6 +360,9 @@ export default function CorridorMap({
                   <Popup className="map-incident-popup">
                     <div className="incident-popup-card">
                       <div className="popup-badge-row">
+                        <span className={`badge ${isVerified ? 'badge-verified' : 'badge-unverified'}`}>
+                          {isVerified ? t('map.verified_report') : t('map.unverified_report')}
+                        </span>
                         <span className="badge badge-category">
                           {t(`categories.${rep.category}`, rep.category)}
                         </span>
@@ -378,7 +382,7 @@ export default function CorridorMap({
                             className="popup-seg-link"
                             onClick={() => onSelectSegment(rep.nearest_segment_id)}
                           >
-                            Inspect Segment
+                            {t('map.inspect_segment')}
                           </button>
                         )}
                       </div>
@@ -422,6 +426,12 @@ export default function CorridorMap({
               );
             })}
         </MapContainer>
+      </div>
+
+      {/* Retrospective Scientific Advisory Notice */}
+      <div className="map-retrospective-notice">
+        <AlertCircle size={13} style={{ flexShrink: 0, color: 'var(--warning)' }} />
+        <span>{t('map.retrospective_disclaimer')} • {t('map.tile_notice')}</span>
       </div>
     </div>
   );

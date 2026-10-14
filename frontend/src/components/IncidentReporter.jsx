@@ -16,6 +16,8 @@ import {
   Layers,
   ChevronRight,
   Info,
+  Save,
+  RotateCcw,
 } from 'lucide-react';
 import {
   enqueueReport,
@@ -33,6 +35,16 @@ const CATEGORIES = [
   { id: 'single_lane_or_obstruction', icon: '⚠️' },
   { id: 'snow_or_ice', icon: '❄️' },
   { id: 'other', icon: '📍' },
+];
+
+const CORRIDOR_SHORTCUTS = [
+  { name: 'Chanderkot', lat: '33.2080', lon: '75.2950' },
+  { name: 'Cafeteria Morh', lat: '33.2370', lon: '75.2420' },
+  { name: 'Ramban Town', lat: '33.2530', lon: '75.2070' },
+  { name: 'Maroog', lat: '33.2620', lon: '75.1860' },
+  { name: 'Digdol', lat: '33.3030', lon: '75.1820' },
+  { name: 'Ramsu', lat: '33.3440', lon: '75.2000' },
+  { name: 'Banihal', lat: '33.4380', lon: '75.1910' },
 ];
 
 export default function IncidentReporter({ onNavigateToSignIn }) {
@@ -55,12 +67,63 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
   const [formStep, setFormStep] = useState(1); // 1 = Details, 2 = Review & Confirm
   const [formError, setFormError] = useState(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
 
   // Queue & My Reports State
   const [pendingItems, setPendingItems] = useState([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [myReports, setMyReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(false);
+
+  // 1. Restore draft from localStorage on initial load
+  useEffect(() => {
+    try {
+      const savedDraft = localStorage.getItem('routewise_incident_draft');
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed.category) setCategory(parsed.category);
+        if (parsed.description) setDescription(parsed.description);
+        if (parsed.latitude) setLatitude(parsed.latitude);
+        if (parsed.longitude) setLongitude(parsed.longitude);
+        if (parsed.locationSource) setLocationSource(parsed.locationSource);
+        setDraftRestored(true);
+      }
+    } catch (_) {}
+  }, []);
+
+  // 2. Auto-save draft on changes
+  useEffect(() => {
+    if (description || category !== 'shooting_stones' || latitude !== '33.2435') {
+      try {
+        localStorage.setItem(
+          'routewise_incident_draft',
+          JSON.stringify({
+            category,
+            description,
+            latitude,
+            longitude,
+            locationSource,
+          })
+        );
+      } catch (_) {}
+    }
+  }, [category, description, latitude, longitude, locationSource]);
+
+  const handleClearDraft = () => {
+    try {
+      localStorage.removeItem('routewise_incident_draft');
+    } catch (_) {}
+    setCategory('shooting_stones');
+    setDescription('');
+    setLatitude('33.2435');
+    setLongitude('75.2415');
+    setLocationSource('Default (Ramban Gateway)');
+    setGpsAccuracy(null);
+    setPhotoBlob(null);
+    setPhotoPreview(null);
+    setPhotoName(null);
+    setDraftRestored(false);
+  };
 
   // Refresh pending queue
   const refreshQueue = async () => {
@@ -120,15 +183,24 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
         const lon = pos.coords.longitude.toFixed(6);
         setLatitude(lat);
         setLongitude(lon);
-        setGpsAccuracy(Math.round(pos.coords.accuracy));
-        setLocationSource(`Live GPS (±${Math.round(pos.coords.accuracy)}m)`);
+        const acc = Math.round(pos.coords.accuracy);
+        setGpsAccuracy(acc);
+        setLocationSource(`Live GPS (±${acc}m)`);
       },
       (err) => {
         setIsCapturingGps(false);
-        setFormError(`GPS permission denied or unavailable (${err.message}). Coordinates can be entered manually.`);
+        setFormError(t('reporter.gps_denied'));
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
+  };
+
+  const handleSelectShortcut = (sc) => {
+    setLatitude(sc.lat);
+    setLongitude(sc.lon);
+    setLocationSource(`Landmark: ${sc.name}`);
+    setGpsAccuracy(null);
+    setFormError(null);
   };
 
   const handlePhotoSelect = (e) => {
@@ -136,11 +208,11 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
     if (!file) return;
 
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setFormError('Only JPEG, PNG, or WebP photo files are accepted.');
+      setFormError(t('validation.photo_format'));
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      setFormError('Photo size exceeds maximum 5 MB limit.');
+      setFormError(t('validation.photo_size'));
       return;
     }
 
@@ -165,7 +237,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
     const latNum = parseFloat(latitude);
     const lonNum = parseFloat(longitude);
     if (isNaN(latNum) || isNaN(lonNum)) {
-      setFormError('Valid numeric latitude and longitude coordinates are required.');
+      setFormError(t('validation.lat_lon_required'));
       return;
     }
 
@@ -184,17 +256,16 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
     };
 
     try {
-      // 1. Enqueue in IndexedDB
+      // 1. Enqueue in persistent IndexedDB
       await enqueueReport(reportPayload);
       setSubmitSuccess(true);
       setFormStep(1);
-      setDescription('');
-      setPhotoBlob(null);
-      setPhotoPreview(null);
-      setPhotoName(null);
+
+      // Clear draft after enqueuing
+      handleClearDraft();
       await refreshQueue();
 
-      // 2. Immediate sync attempt
+      // 2. Immediate sync attempt if online
       triggerSync();
 
       setTimeout(() => setSubmitSuccess(false), 5000);
@@ -227,7 +298,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
   };
 
   return (
-    <div className="incident-reporter-container">
+    <div className="incident-reporter-container" role="region" aria-label="Incident Reporter">
       {/* Tab Header Navigation */}
       <div className="reporter-tabs">
         <button
@@ -236,7 +307,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
           onClick={() => setActiveTab('new')}
         >
           <AlertTriangle size={16} />
-          <span>{t('reporter.submit_title')}</span>
+          <span>{t('reporter.new_report')}</span>
         </button>
 
         <button
@@ -245,7 +316,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
           onClick={() => setActiveTab('pending')}
         >
           <Clock size={16} />
-          <span>Pending Queue</span>
+          <span>{t('reporter.pending_queue')}</span>
           {pendingItems.length > 0 && (
             <span className="queue-pill-count">{pendingItems.length}</span>
           )}
@@ -257,7 +328,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
           onClick={() => setActiveTab('mine')}
         >
           <FileText size={16} />
-          <span>{t('nav.my_reports')}</span>
+          <span>{t('reporter.my_reports')}</span>
         </button>
       </div>
 
@@ -271,6 +342,25 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
         </div>
       )}
 
+      {/* Draft Restored Banner */}
+      {activeTab === 'new' && draftRestored && (
+        <div className="draft-notice-banner">
+          <div className="draft-notice-text">
+            <Save size={14} style={{ color: 'var(--accent-secondary)' }} />
+            <span>{t('reporter.draft_restored')}</span>
+          </div>
+          <button
+            type="button"
+            className="draft-clear-btn"
+            onClick={handleClearDraft}
+            title={t('reporter.clear_draft')}
+          >
+            <RotateCcw size={13} />
+            <span>{t('reporter.clear_draft')}</span>
+          </button>
+        </div>
+      )}
+
       {/* TAB 1: New Report Submission Form */}
       {activeTab === 'new' && (
         <div className="reporter-card">
@@ -278,7 +368,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
             <div className="state-box state-success" style={{ marginBottom: 16 }}>
               <CheckCircle size={20} />
               <div>
-                <strong>Report Enqueued Successfully!</strong> Saved to local persistent queue and syncing with patrol dispatch.
+                <strong>{t('reporter.enqueued_success')}</strong>
               </div>
             </div>
           )}
@@ -311,10 +401,10 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                   </div>
                 </div>
 
-                {/* 2. GPS Location Capture */}
+                {/* 2. GPS Location Capture & Shortcuts */}
                 <div className="form-group">
                   <div className="label-with-action">
-                    <label className="form-label">Location Coordinates (NH-44 Corridor)</label>
+                    <label className="form-label">{t('reporter.coordinates_label')}</label>
                     <button
                       type="button"
                       className="inline-action-btn"
@@ -322,7 +412,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                       disabled={isCapturingGps}
                     >
                       <MapPin size={14} />
-                      <span>{isCapturingGps ? 'Reading GPS...' : t('reporter.gps_capture')}</span>
+                      <span>{isCapturingGps ? t('reporter.acquiring_gps') : t('reporter.acquire_gps')}</span>
                     </button>
                   </div>
 
@@ -334,7 +424,10 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                         step="any"
                         className="form-input"
                         value={latitude}
-                        onChange={(e) => setLatitude(e.target.value)}
+                        onChange={(e) => {
+                          setLatitude(e.target.value);
+                          setLocationSource('Manual Coordinate Entry');
+                        }}
                         required
                       />
                     </div>
@@ -345,20 +438,40 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                         step="any"
                         className="form-input"
                         value={longitude}
-                        onChange={(e) => setLongitude(e.target.value)}
+                        onChange={(e) => {
+                          setLongitude(e.target.value);
+                          setLocationSource('Manual Coordinate Entry');
+                        }}
                         required
                       />
                     </div>
                   </div>
                   <span className="input-hint-text">
-                    Source: {locationSource} {gpsAccuracy && `(Accuracy: ±${gpsAccuracy}m)`}
+                    Source: {locationSource} {gpsAccuracy && `(${t('reporter.gps_accuracy', { meters: gpsAccuracy })})`}
                   </span>
+
+                  {/* Quick Landmark Shortcuts */}
+                  <div className="landmark-shortcuts-row">
+                    <span className="shortcuts-title">{t('reporter.landmark_shortcuts')}:</span>
+                    <div className="shortcuts-pills">
+                      {CORRIDOR_SHORTCUTS.map((sc) => (
+                        <button
+                          key={sc.name}
+                          type="button"
+                          className="shortcut-pill-btn"
+                          onClick={() => handleSelectShortcut(sc)}
+                        >
+                          {sc.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {/* 3. Description */}
+                {/* 3. Description Notes */}
                 <div className="form-group">
                   <label className="form-label">
-                    Observations & Notes (Optional)
+                    {t('reporter.description_label')}
                     <span className="char-count">{description.length}/1000</span>
                   </label>
                   <textarea
@@ -386,7 +499,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                       <Camera size={22} />
                       <span>{photoName ? photoName : 'Tap to take photo or choose file'}</span>
                       <span className="exif-notice">
-                        (EXIF camera metadata and device info are automatically stripped on save for privacy)
+                        {t('reporter.photo_notice')}
                       </span>
                     </label>
 
@@ -413,9 +526,18 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    onClick={() => setFormStep(2)}
+                    onClick={() => {
+                      const latNum = parseFloat(latitude);
+                      const lonNum = parseFloat(longitude);
+                      if (isNaN(latNum) || isNaN(lonNum)) {
+                        setFormError(t('validation.lat_lon_required'));
+                        return;
+                      }
+                      setFormError(null);
+                      setFormStep(2);
+                    }}
                   >
-                    <span>{t('reporter.review_step')}</span>
+                    <span>{t('reporter.step_review')}</span>
                     <ChevronRight size={16} />
                   </button>
                 </div>
@@ -434,6 +556,10 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                     <strong className="review-val">{latitude}°N, {longitude}°E</strong>
                   </div>
                   <div className="review-row">
+                    <span className="review-label">Location Source:</span>
+                    <span className="review-val">{locationSource}</span>
+                  </div>
+                  <div className="review-row">
                     <span className="review-label">Observations:</span>
                     <span className="review-val">{description || 'None provided'}</span>
                   </div>
@@ -449,7 +575,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                     className="btn btn-secondary"
                     onClick={() => setFormStep(1)}
                   >
-                    Back to Edit
+                    {t('reporter.back_to_edit')}
                   </button>
                   <button
                     type="submit"
@@ -457,7 +583,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                     disabled={isGuest}
                   >
                     <Send size={16} />
-                    <span>Confirm & Enqueue Report</span>
+                    <span>{t('reporter.confirm_submit')}</span>
                   </button>
                 </div>
               </div>
@@ -483,7 +609,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
               disabled={isSyncing || pendingItems.length === 0}
             >
               <RefreshCw size={14} className={isSyncing ? 'spin-icon' : ''} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync All Now'}</span>
+              <span>{isSyncing ? t('reporter.syncing') : t('reporter.sync_now')}</span>
             </button>
           </div>
 
@@ -526,7 +652,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                       type="button"
                       className="btn-icon"
                       onClick={() => triggerSync()}
-                      title="Retry sync now"
+                      title={t('reporter.retry')}
                     >
                       <RefreshCw size={15} />
                     </button>
@@ -534,7 +660,7 @@ export default function IncidentReporter({ onNavigateToSignIn }) {
                       type="button"
                       className="btn-icon danger"
                       onClick={() => handleDiscard(item.client_uuid)}
-                      title="Discard report from queue"
+                      title={t('reporter.discard')}
                     >
                       <Trash2 size={15} />
                     </button>
