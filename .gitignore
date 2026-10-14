@@ -1,36 +1,69 @@
-# secrets (never commit)
+# ---------- Secrets (never commit) ----------
 .env
-.cdsapirc
+.env.*
+!.env.example
+*.pem
 *.key
+secrets/
 
-# virtual env and caches
-venv/
-.venv/
-cache/
+# ---------- Python / FastAPI ----------
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# large or regenerable data
-*.nc
-*.tif
-data/weather/
-data/weather_daily_by_segment.csv
-
-# intermediate reports
-data/geocode_report.csv
-data/needs_manual_coordinates.csv
-
-# OS and editor files
-.DS_Store
-Thumbs.db
-.vscode/
-
-# SQL offline Database
-*.db
-
-# Node.js dependencies and build output
+# ---------- Node / React ----------
 node_modules/
 dist/
+build/
+.vite/
+.next/
+npm-debug.log*
+yarn-error.log*
+coverage/
 
-# Uploaded incident media
-data/uploads/
+# ---------- Databases and runtime data ----------
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ---------- User uploads (patrol report photos) ----------
+uploads/
+backend/uploads/
+media/
+
+# ---------- Large ML artifacts and raw data ----------
+# Uncomment/adjust depending on how you handle them (see notes)
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.onnx
+data/raw/
+data/downloads/
+*.tif
+*.tiff
+*.zip
+
+# ---------- Notebooks ----------
+.ipynb_checkpoints/
+
+# ---------- Test and tooling output ----------
+playwright-report/
+test-results/
+*.log
+logs/
+
+# ---------- Editors and OS ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
