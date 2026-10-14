@@ -1,0 +1,113 @@
+{
+  "app": {
+    "name": "RouteWise",
+    "subtitle": "NH-44 Ramban–Banihal Predictive Corridor AI",
+    "retrospective_badge": "Retrospective Historical Analysis",
+    "simulated_badge": "Simulated Demo Data",
+    "guest_mode": "Guest Session Active (Read-Only)",
+    "guest_prompt": "Sign in or create an account to submit field reports and manage patrol operations."
+  },
+  "nav": {
+    "overview": "Overview",
+    "journey": "Plan a Journey",
+    "map": "Corridor Risk Map",
+    "patrol": "Patrol Operations",
+    "report": "Report Incident",
+    "my_reports": "My Reports",
+    "chat": "Conversational AI",
+    "history": "Historical Observations",
+    "settings": "Profile / Settings",
+    "signin": "Sign In",
+    "signup": "Create Account",
+    "signout": "Sign Out"
+  },
+  "risk": {
+    "low": "Low Risk",
+    "medium": "Medium Risk",
+    "high": "High Risk",
+    "unknown": "Unknown Status",
+    "score": "Risk Score",
+    "tier": "Risk Tier",
+    "segments": "Segments",
+    "high_risk_count": "High Hazard Segments",
+    "medium_risk_count": "Medium Hazard Segments",
+    "low_risk_count": "Low Hazard Segments"
+  },
+  "categories": {
+    "landslide": "Landslide",
+    "shooting_stones": "Shooting Stones",
+    "flooding": "Waterlogging / Flooding",
+    "road_damage": "Road Surface Damage",
+    "single_lane_or_obstruction": "Single Lane / Obstruction",
+    "snow_or_ice": "Snow / Icy Surface",
+    "other": "Other Hazard"
+  },
+  "status": {
+    "submitted": "Submitted",
+    "verified": "Verified",
+    "assigned": "Assigned",
+    "resolved": "Resolved",
+    "rejected": "Rejected"
+  },
+  "drawer": {
+    "title": "Segment Detailed Analysis",
+    "chainage": "Chainage & Coordinates",
+    "elevation": "Mean Elevation",
+    "slope": "Mean Gradient",
+    "input_features": "Genuine Input Features (Not Model Explanations)",
+    "daily_precip": "Daily Precipitation",
+    "precip_7d": "7-Day Cumulative Rain",
+    "temperature": "Mean Temperature",
+    "snowfall": "Snowfall Equiv.",
+    "linked_reports": "Linked Field Reports",
+    "no_reports": "No field incidents reported on this segment for current selection."
+  },
+  "patrol": {
+    "dashboard_title": "Highway Patrol Operations Center",
+    "dashboard_subtitle": "Operational Incident Queue & State Machine Management",
+    "verify_action": "Verify Report",
+    "assign_action": "Assign to Patrol",
+    "resolve_action": "Mark Resolved",
+    "reject_action": "Reject Report",
+    "reopen_action": "Reopen Report",
+    "note_placeholder": "Enter operational dispatch note or reason...",
+    "assignee_select": "Select Patrol Officer...",
+    "confirm": "Confirm Action"
+  },
+  "reporter": {
+    "submit_title": "Submit Corridor Incident Report",
+    "category_select": "Select Hazard Category",
+    "description_placeholder": "Describe conditions (lane blockage, rock size, water depth)...",
+    "gps_capture": "Capture Current GPS Location",
+    "gps_accuracy": "Accuracy: ±{{meters}}m",
+    "photo_label": "Attach Evidence Photo (Optional, JPEG/PNG/WebP, max 5MB)",
+    "review_step": "Review & Submit",
+    "queue_badge": "{{count}} Pending Sync",
+    "sync_now": "Sync Now",
+    "discard": "Discard",
+    "retry": "Retry"
+  },
+  "advisories": {
+    "official_title": "Official Traffic Police Bulletins",
+    "disclaimer": "RouteWise provides retrospective and predictive analysis; official traffic advisories are the authority on current road status.",
+    "tcu_ramban": "TCU Ramban Control Room",
+    "tcu_jammu": "TCU Jammu Control Room",
+    "tcu_srinagar": "TCU Srinagar Control Room",
+    "emergency": "Police Control Room (PCR)"
+  },
+  "services": {
+    "title": "Along-Route Emergency & Transit Services",
+    "disclaimer": "Facility readiness may change during severe weather. Verify via TCU before transit.",
+    "hospital": "Hospital / Trauma",
+    "police": "Police / TCU",
+    "fuel": "Fuel Station",
+    "mechanic": "Recovery / Crane",
+    "verified": "Verified Record",
+    "unverified": "Demo Placeholder"
+  },
+  "journey": {
+    "honesty_notice": "The NH-44 Ramban–Banihal section is a single physical linear mountain highway; topological alternative paths do not exist within this corridor graph.",
+    "compare_dates": "Compare Departure Dates",
+    "vehicle_notice": "Vehicle type sets speed advisory, but does not alter the physical route on this single highway."
+  }
+}

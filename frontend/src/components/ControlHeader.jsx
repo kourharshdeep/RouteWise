@@ -55,10 +55,10 @@ export default function ControlHeader({
       </div>
 
       {/* Date Control Bar */}
-      <div className="control-bar" style={{ padding: '8px 12px', background: '#0f172a' }}>
+      <div className="control-bar" style={{ padding: '8px 12px', background: 'var(--bg-input)' }}>
         <div className="date-controls">
           <div className="date-input-group">
-            <Calendar size={15} color="#94a3b8" />
+            <Calendar size={15} style={{ color: 'var(--text-muted)' }} />
             <label htmlFor="obs-date">Observation Date:</label>
             <input
               id="obs-date"
@@ -73,7 +73,7 @@ export default function ControlHeader({
           </div>
 
           <div className="sample-buttons">
-            <span style={{ fontSize: 12, color: '#64748b' }}>Benchmark Dates:</span>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Benchmark Dates:</span>
             {['2023-07-09', '2024-03-15', '2022-01-20', '2025-08-10'].map((d) => (
               <button
                 key={d}

@@ -1,0 +1,167 @@
+/**
+ * RouteWise Centralized Design Tokens
+ * Supports both [data-theme="dark"] and [data-theme="light"]
+ */
+
+:root,
+html[data-theme="dark"],
+body[data-theme="dark"] {
+  /* Surface & Background */
+  --bg-app: #0b0f19;
+  --bg-surface: #141d2e;
+  --bg-surface-raised: #1c2840;
+  --bg-sidebar: #141d2e;
+  --bg-input: #0b0f19;
+  --bg-card: #141d2e;
+  --hover-bg: #1c2840;
+
+  /* Borders & Focus */
+  --border-default: #24344d;
+  --border-strong: #334a6e;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --focus-ring: rgba(56, 189, 248, 0.5);
+
+  /* Typography */
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --text-on-accent: #ffffff;
+
+  /* Brand Accents */
+  --accent-primary: #0284c7;
+  --accent-secondary: #38bdf8;
+  --accent-hover: #0369a1;
+
+  /* Status Tokens: Risk Tiers */
+  --risk-high: #ef4444;
+  --risk-high-bg: rgba(239, 68, 68, 0.15);
+  --risk-high-border: rgba(239, 68, 68, 0.4);
+  --risk-high-text: #fca5a5;
+
+  --risk-medium: #f59e0b;
+  --risk-medium-bg: rgba(245, 158, 11, 0.15);
+  --risk-medium-border: rgba(245, 158, 11, 0.4);
+  --risk-medium-text: #fde68a;
+
+  --risk-low: #10b981;
+  --risk-low-bg: rgba(16, 185, 129, 0.15);
+  --risk-low-border: rgba(16, 185, 129, 0.4);
+  --risk-low-text: #6ee7b7;
+
+  --risk-unknown: #64748b;
+  --risk-unknown-bg: rgba(100, 116, 139, 0.15);
+  --risk-unknown-border: rgba(100, 116, 139, 0.4);
+  --risk-unknown-text: #cbd5e1;
+
+  /* Status Tokens: System & Banners */
+  --info: #38bdf8;
+  --info-bg: rgba(2, 132, 199, 0.12);
+  --info-border: rgba(56, 189, 248, 0.3);
+  --info-text: #bae6fd;
+
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.3);
+  --warning-text: #fde68a;
+
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-border: rgba(16, 185, 129, 0.3);
+  --success-text: #a7f3d0;
+
+  --danger: #ef4444;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --danger-border: rgba(239, 68, 68, 0.3);
+  --danger-text: #fca5a5;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+
+  /* Map specifics */
+  --map-container-bg: #111827;
+  --map-polyline-casing: #0b0f19;
+}
+
+html[data-theme="light"],
+body[data-theme="light"] {
+  /* Surface & Background */
+  --bg-app: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #f1f5f9;
+  --bg-sidebar: #ffffff;
+  --bg-input: #ffffff;
+  --bg-card: #ffffff;
+  --hover-bg: #f1f5f9;
+
+  /* Borders & Focus */
+  --border-default: #cbd5e1;
+  --border-strong: #94a3b8;
+  --border-subtle: #e2e8f0;
+  --focus-ring: rgba(2, 132, 199, 0.4);
+
+  /* Typography */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --text-dim: #64748b;
+  --text-on-accent: #ffffff;
+
+  /* Brand Accents */
+  --accent-primary: #0284c7;
+  --accent-secondary: #0369a1;
+  --accent-hover: #075985;
+
+  /* Status Tokens: Risk Tiers (High contrast for light theme) */
+  --risk-high: #dc2626;
+  --risk-high-bg: #fef2f2;
+  --risk-high-border: #fca5a5;
+  --risk-high-text: #991b1b;
+
+  --risk-medium: #d97706;
+  --risk-medium-bg: #fffbeb;
+  --risk-medium-border: #fcd34d;
+  --risk-medium-text: #92400e;
+
+  --risk-low: #059669;
+  --risk-low-bg: #ecfdf5;
+  --risk-low-border: #6ee7b7;
+  --risk-low-text: #065f46;
+
+  --risk-unknown: #64748b;
+  --risk-unknown-bg: #f1f5f9;
+  --risk-unknown-border: #cbd5e1;
+  --risk-unknown-text: #334155;
+
+  /* Status Tokens: System & Banners */
+  --info: #0284c7;
+  --info-bg: #f0f9ff;
+  --info-border: #bae6fd;
+  --info-text: #0369a1;
+
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+  --warning-text: #854d0e;
+
+  --success: #059669;
+  --success-bg: #ecfdf5;
+  --success-border: #a7f3d0;
+  --success-text: #065f46;
+
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --danger-text: #991b1b;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+
+  /* Map specifics */
+  --map-container-bg: #e2e8f0;
+  --map-polyline-casing: #ffffff;
+}

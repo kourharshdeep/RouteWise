@@ -10,7 +10,7 @@ export default function SegmentInspector({ selectedSegment, riskData }) {
           <Layers size={16} />
         </div>
         <div className="inspector-empty">
-          <Compass size={32} style={{ margin: '0 auto 8px auto', display: 'block', color: '#475569' }} />
+          <Compass size={32} style={{ margin: '0 auto 8px auto', display: 'block', color: 'var(--text-dim)' }} />
           Click any road segment on the corridor map to inspect terrain characteristics and advisory risk output.
         </div>
       </div>
@@ -24,13 +24,13 @@ export default function SegmentInspector({ selectedSegment, riskData }) {
   const getTierColor = (tier) => {
     switch (tier) {
       case 'High':
-        return '#ef4444';
+        return 'var(--risk-high)';
       case 'Medium':
-        return '#f59e0b';
+        return 'var(--risk-medium)';
       case 'Low':
-        return '#10b981';
+        return 'var(--risk-low)';
       default:
-        return '#94a3b8';
+        return 'var(--risk-unknown)';
     }
   };
 
@@ -38,7 +38,7 @@ export default function SegmentInspector({ selectedSegment, riskData }) {
     <div className="card">
       <div className="card-title">
         <span>Segment Inspector</span>
-        <MapPin size={16} color="#38bdf8" />
+        <MapPin size={16} style={{ color: 'var(--accent-secondary)' }} />
       </div>
 
       <div className="inspector-list">
@@ -71,7 +71,7 @@ export default function SegmentInspector({ selectedSegment, riskData }) {
 
         <div className="inspector-row">
           <span className="inspector-label">Data Status</span>
-          <span className="inspector-value" style={{ color: riskItem?.status === 'OK' ? '#10b981' : '#f59e0b' }}>
+          <span className="inspector-value" style={{ color: riskItem?.status === 'OK' ? 'var(--success)' : 'var(--warning)' }}>
             {riskItem ? riskItem.status : 'N/A'}
           </span>
         </div>
@@ -109,10 +109,10 @@ export default function SegmentInspector({ selectedSegment, riskData }) {
         style={{
           marginTop: 14,
           padding: '8px 10px',
-          background: 'rgba(2, 132, 199, 0.08)',
+          background: 'var(--info-bg)',
           borderRadius: 6,
           fontSize: 11,
-          color: '#bae6fd',
+          color: 'var(--info-text)',
           lineHeight: 1.4,
         }}
       >
