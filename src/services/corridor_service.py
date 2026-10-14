@@ -6,20 +6,29 @@ and exposes the 151 segments as a GeoJSON FeatureCollection.
 """
 from __future__ import annotations
 
+import json
+import math
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from fastapi import HTTPException
 import networkx as nx
 import pandas as pd
 import pyproj
 from shapely import wkt
 
 from src.api.config import settings
+from src.api.schemas.auth import UserProfile, UserRole
 from src.api.schemas.corridor import (
+    AlongRouteServiceItem,
     CorridorGeoJSONResponse,
     GeoJSONGeometry,
+    OfficialAdvisoriesResponse,
     SegmentFeature,
+    SegmentFeatureDetailResponse,
     SegmentProperties,
+    SegmentWeatherDetail,
 )
 
 
@@ -113,5 +122,119 @@ class CorridorService:
         )
         return self._geojson_cache
 
+    def get_segment_features(
+        self,
+        segment_id: str,
+        date_str: str,
+        current_user: Optional[UserProfile] = None,
+    ) -> SegmentFeatureDetailResponse:
+        """Retrieves real input features (terrain + ERA5-Land weather) and linked reports for a segment."""
+        # 1. Fetch static properties
+        geojson = self.get_corridor_geojson()
+        feat = next((f for f in geojson.features if f.id == segment_id), None)
+        if not feat:
+            raise HTTPException(status_code=404, detail=f"Corridor segment '{segment_id}' not found.")
+
+        props = feat.properties
+        slope_pct = round(props.slope * 100, 2)
+        slope_deg = round(math.degrees(math.atan(props.slope)), 2)
+
+        # 2. Query weather from SQLite
+        weather_detail = None
+        db_conn = sqlite3.connect(settings.db_path)
+        db_conn.row_factory = sqlite3.Row
+        try:
+            w_row = db_conn.execute(
+                "SELECT * FROM segment_weather WHERE segment_id = ? AND date = ?",
+                (segment_id, date_str),
+            ).fetchone()
+            if w_row:
+                weather_detail = SegmentWeatherDetail(
+                    date=date_str,
+                    precip_mm=round(float(w_row["precip_mm"]), 2),
+                    precip_3d_mm=round(float(w_row["precip_3d_mm"]), 2),
+                    precip_7d_mm=round(float(w_row["precip_7d_mm"]), 2),
+                    temp_mean_c=round(float(w_row["temp_mean_c"]), 1),
+                    temp_min_c=round(float(w_row["temp_min_c"]), 1),
+                    snowfall_mm_we=round(float(w_row["snowfall_mm_we"]), 2),
+                    snow_depth_m=round(max(0.0, float(w_row["snow_depth_m"])), 4),
+                )
+
+            # 3. Linked field reports
+            is_patrol = current_user is not None and current_user.role in (UserRole.PATROL.value, UserRole.ADMIN.value)
+            if is_patrol:
+                rep_rows = db_conn.execute(
+                    "SELECT id, category, status, description, created_at, is_simulated FROM reports WHERE nearest_segment_id = ?",
+                    (segment_id,),
+                ).fetchall()
+            else:
+                rep_rows = db_conn.execute(
+                    "SELECT id, category, status, description, created_at, is_simulated FROM reports WHERE nearest_segment_id = ? AND status IN ('verified', 'assigned')",
+                    (segment_id,),
+                ).fetchall()
+
+            reports = [dict(r) for r in rep_rows]
+        finally:
+            db_conn.close()
+
+        return SegmentFeatureDetailResponse(
+            segment_id=segment_id,
+            date=date_str,
+            length_m=props.length_m,
+            slope_deg=slope_deg,
+            slope_pct=slope_pct,
+            elevation_m=props.elevation_m,
+            highway=props.highway,
+            weather=weather_detail,
+            reports=reports,
+        )
+
+    def get_along_route_services(self) -> List[AlongRouteServiceItem]:
+        """Loads verified along-route facilities from static data file."""
+        services_path = Path("data/along_route_services.json")
+        if not services_path.exists():
+            return []
+        with open(services_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return [AlongRouteServiceItem(**item) for item in data]
+
+    def get_official_advisories(self) -> OfficialAdvisoriesResponse:
+        """Loads official J&K Traffic Police channels and contacts."""
+        adv_path = Path("data/official_advisories.json")
+        if not adv_path.exists():
+            raise HTTPException(status_code=404, detail="Advisories configuration not found.")
+        with open(adv_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return OfficialAdvisoriesResponse(**data)
+
+    def get_corridor_weather(self, date_str: str) -> Dict[str, Any]:
+        """Returns corridor-wide weather snapshot across all segments for a date."""
+        db_conn = sqlite3.connect(settings.db_path)
+        db_conn.row_factory = sqlite3.Row
+        try:
+            rows = db_conn.execute(
+                "SELECT segment_id, precip_mm, precip_7d_mm, temp_mean_c FROM segment_weather WHERE date = ?",
+                (date_str,),
+            ).fetchall()
+        finally:
+            db_conn.close()
+
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No weather observations stored for date '{date_str}'.")
+
+        precips = [float(r["precip_mm"]) for r in rows]
+        temps = [float(r["temp_mean_c"]) for r in rows]
+
+        return {
+            "date": date_str,
+            "data_source": "ERA5-Land daily reanalysis (Historical Retrospective)",
+            "total_segments_covered": len(rows),
+            "max_precipitation_mm": round(max(precips), 2),
+            "mean_precipitation_mm": round(sum(precips) / len(precips), 2),
+            "mean_temperature_c": round(sum(temps) / len(temps), 1),
+            "segments": {r["segment_id"]: {"precip_mm": round(float(r["precip_mm"]), 2), "temp_mean_c": round(float(r["temp_mean_c"]), 1)} for r in rows},
+        }
+
 
 corridor_service = CorridorService()
+

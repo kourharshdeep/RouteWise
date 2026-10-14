@@ -1,0 +1,55 @@
+{
+  "authority": "Jammu & Kashmir Traffic Police Headquarters",
+  "disclaimer": "RouteWise provides retrospective and predictive analysis; official traffic advisories are the authority on current road status.",
+  "last_verified": "2026-10-10",
+  "verification_status": "Verified against public J&K Traffic Police directory",
+  "official_channels": [
+    {
+      "platform": "Twitter / X",
+      "handle": "@Traffic_hqrs",
+      "url": "https://twitter.com/Traffic_hqrs",
+      "description": "Daily NH-44 opening/closure status and convoy movement timings."
+    },
+    {
+      "platform": "Official Portal",
+      "handle": "traffic.jkpolice.gov.in",
+      "url": "https://traffic.jkpolice.gov.in",
+      "description": "Government traffic advisories and real-time transit bulletins."
+    },
+    {
+      "platform": "Facebook Page",
+      "handle": "Traffic Police J&K",
+      "url": "https://facebook.com/TrafficPoliceJK",
+      "description": "Photo updates on road clearance and weather alerts."
+    }
+  ],
+  "control_units": [
+    {
+      "unit": "TCU Ramban (Sector Headquarters)",
+      "phone": "+91-9419993745",
+      "landline": "01998-266686",
+      "location": "Ramban Chowk, NH-44",
+      "role": "Controls Cafeteria Morh, Seri, Digdol, Panthyal, Ramsu."
+    },
+    {
+      "unit": "TCU Srinagar",
+      "phone": "+91-9419097740",
+      "landline": "0194-2450022",
+      "location": "Traffic Police HQ, Srinagar",
+      "role": "Controls valley-bound freight and Navyug Tunnel dispatch."
+    },
+    {
+      "unit": "TCU Jammu",
+      "phone": "+91-9419147732",
+      "landline": "0191-2459048",
+      "location": "Traffic Police HQ, Jammu",
+      "role": "Controls Nagrota checkpost and Jammu-to-Srinagar convoy batches."
+    },
+    {
+      "unit": "Police Control Room (PCR) Ramban",
+      "phone": "01998-266686",
+      "location": "District Police Lines, Ramban",
+      "role": "24x7 emergency disaster response and ambulance coordination."
+    }
+  ]
+}
