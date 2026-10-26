@@ -104,27 +104,26 @@ def _init_test_database(db_path: Path) -> None:
             (user_hash, user_salt, now),
         )
 
-        # 4. Seed a small weather slice from CSV (first 500 rows if present)
+        # 4. Seed a weather slice from CSV for 2023-07-09 (151 corridor segments)
         csv_path = REPO_ROOT / "data" / "weather_daily_by_segment.csv"
         if csv_path.exists():
             import csv
             with open(csv_path, "r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 rows = []
-                for i, r in enumerate(reader):
-                    if i >= 1000:
-                        break
-                    rows.append((
-                        r.get("segment_id"),
-                        r.get("date"),
-                        float(r["precip_mm"]) if r.get("precip_mm") else 0.0,
-                        float(r["snowfall_mm_we"]) if r.get("snowfall_mm_we") else 0.0,
-                        float(r["temp_mean_c"]) if r.get("temp_mean_c") else 0.0,
-                        float(r["temp_min_c"]) if r.get("temp_min_c") else 0.0,
-                        float(r["snow_depth_m"]) if r.get("snow_depth_m") else 0.0,
-                        float(r["precip_3d_mm"]) if r.get("precip_3d_mm") else 0.0,
-                        float(r["precip_7d_mm"]) if r.get("precip_7d_mm") else 0.0,
-                    ))
+                for r in reader:
+                    if r.get("date") == "2023-07-09":
+                        rows.append((
+                            r.get("segment_id"),
+                            r.get("date"),
+                            float(r["precip_mm"]) if r.get("precip_mm") else 0.0,
+                            float(r["snowfall_mm_we"]) if r.get("snowfall_mm_we") else 0.0,
+                            float(r["temp_mean_c"]) if r.get("temp_mean_c") else 0.0,
+                            float(r["temp_min_c"]) if r.get("temp_min_c") else 0.0,
+                            float(r["snow_depth_m"]) if r.get("snow_depth_m") else 0.0,
+                            float(r["precip_3d_mm"]) if r.get("precip_3d_mm") else 0.0,
+                            float(r["precip_7d_mm"]) if r.get("precip_7d_mm") else 0.0,
+                        ))
                 if rows:
                     conn.executemany(
                         """
@@ -138,6 +137,13 @@ def _init_test_database(db_path: Path) -> None:
 
 
 _init_test_database(_TEST_DB_PATH)
+
+
+def pytest_pycollect_makemodule(module_path: Path, parent):
+    """Gracefully skips PyTorch model tests with visible skip reason if torch is not installed."""
+    mod_str = str(module_path)
+    if "test_inference" in mod_str or "test_calibration" in mod_str:
+        pytest.importorskip("torch", reason="PyTorch runtime is not installed (CPU inference requires torch)")
 
 
 @pytest.fixture(scope="session", autouse=True)

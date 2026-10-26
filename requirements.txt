@@ -1,14 +1,20 @@
-# RouteWise - Core Dependencies
+# RouteWise - Core Runtime & Test Dependencies
+# Pinned versions derived from actual imports in src/, app/, scripts/, tests/
 
 # PyTorch CPU (minimal runtime for local inference without CUDA bloat)
-# Install with: pip install torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
+# Install CPU build explicitly if desired: pip install torch==2.14.1+cpu --index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.14.1+cpu
+
+# Core Numerical, Graph & Spatial Math
+numpy==2.4.6
+pandas==3.0.6
+networkx==3.6.1
+shapely==2.2.0
+pyproj==3.7.2
 
 # Evaluation, thresholding and metrics
 scikit-learn==1.9.1
-
-# Automated unit testing
-pytest==9.1.1
 
 # FastAPI Backend Foundation
 fastapi==0.143.0
@@ -20,4 +26,8 @@ httpx==0.28.1
 python-multipart==0.0.32
 
 # Image processing for photo content validation and EXIF metadata stripping (privacy)
-Pillow>=10.0.0
+Pillow==12.3.0
+
+# Automated unit testing
+pytest==9.1.1
+

@@ -1,0 +1,12 @@
+# RouteWise - Data Pipeline & Model Training Dependencies (Weeks 1-7 Offline Pipelines)
+# Libraries used exclusively for GIS acquisition, ERA5 atmospheric ingestion, and offline dataset creation.
+
+osmnx==2.1.1
+rasterio==1.4.4
+cdsapi==0.7.7
+xarray==2026.9.0
+netCDF4==1.7.4
+geopandas==1.2.0
+matplotlib==3.11.2
+python-dotenv==1.2.4
+requests==2.34.2
