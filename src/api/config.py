@@ -88,6 +88,7 @@ class Settings:
     db_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_DB_PATH", "data/routewise_local.db")))
     disruptions_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_DISRUPTIONS_PATH", "data/disruption_log_snapped.csv")))
     places_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_PLACES_PATH", "data/place_coordinates.csv")))
+    sorted_segments_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_SORTED_SEGMENTS_PATH", "data/corridor_segments_sorted.json")))
 
     # Security & Authentication (no default secret key; validated at startup)
     secret_key: str = field(default_factory=lambda: _validate_secret_key(os.getenv("ROUTEWISE_SECRET_KEY")))

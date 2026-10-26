@@ -169,6 +169,11 @@
   "journey": {
     "honesty_notice": "The NH-44 Ramban–Banihal section is a single physical linear mountain highway; topological alternative paths do not exist within this corridor graph.",
     "compare_dates": "Compare Departure Dates",
-    "vehicle_notice": "Vehicle type sets speed advisory, but does not alter the physical route on this single highway."
+    "vehicle_notice": "Vehicle type sets speed advisory, but does not alter the physical route on this single highway.",
+    "unknown_segments_count": "{{count}} Unknown",
+    "incomplete_data_title": "Incomplete Hazard Assessment Notice",
+    "incomplete_data_notice": "{{count}} segment(s) on this route lack precomputed ST-GNN risk evaluations. Because missing data is never certified as safe, the overall route risk is designated as Unknown.",
+    "assumed_speed_label": "Estimated Transit Time (Assumed Speed)",
+    "date_out_of_range": "Observation date is outside the supported historical window ({{minDate}} to {{maxDate}})."
   }
 }

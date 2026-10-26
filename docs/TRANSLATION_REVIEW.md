@@ -40,3 +40,17 @@
 - Hindi Devanagari text typically requires 15% to 25% more horizontal width than Latin characters.
 - Font stack fallback includes `'Noto Sans Devanagari'`, `'Mukta'`, and system Indic typography.
 - UI components use flexible wrapping and minimum heights to avoid text truncation.
+
+---
+
+## 5. Unreviewed Additions (Hardening Pass 1)
+The following strings were added for Journey Planner correctness and incomplete hazard awareness, and are marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| `journey.unknown_segments_count` | `{{count}} Unknown` | `{{count}} अज्ञात` | Displays count of unmonitored segments |
+| `journey.incomplete_data_title` | `Incomplete Hazard Assessment Notice` | `अपूर्ण जोखिम मूल्यांकन सूचना` | Alert banner header |
+| `journey.incomplete_data_notice` | `{{count}} segment(s) on this route lack precomputed ST-GNN risk evaluations. Because missing data is never certified as safe, the overall route risk is designated as Unknown.` | `इस मार्ग के {{count}} खंडों में पूर्व-परिकलित ST-GNN जोखिम मूल्यांकन उपलब्ध नहीं है। चूँकि अनुपलब्ध डेटा को कभी सुरक्षित प्रमाणित नहीं माना जाता, इसलिए समग्र मार्ग जोखिम को अज्ञात के रूप में निर्दिष्ट किया गया है।` | Retains truthful scientific semantics |
+| `journey.assumed_speed_label` | `Estimated Transit Time (Assumed Speed)` | `अनुमानित पारगमन समय (कल्पित गति)` | Clarifies that transit duration is modeled, not telemetry |
+| `journey.date_out_of_range` | `Observation date is outside the supported historical window ({{minDate}} to {{maxDate}}).` | `अवलोकन तिथि समर्थित ऐतिहासिक सीमा ({{minDate}} से {{maxDate}}) से बाहर है।` | Date bounds error message |
+

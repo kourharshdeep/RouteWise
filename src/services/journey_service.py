@@ -7,6 +7,8 @@ honest scientific semantics.
 from __future__ import annotations
 
 import csv
+import json
+import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,6 +28,19 @@ from src.api.schemas.journey import (
 from src.services.corridor_service import corridor_service
 from src.services.risk_service import risk_service
 
+logger = logging.getLogger(__name__)
+
+# Named modeling assumptions for travel time estimation (not measured live telemetry)
+ASSUMED_HIGH_RISK_DELAY_MINUTES: int = 3
+ASSUMED_MEDIUM_RISK_DELAY_MINUTES: int = 1
+ASSUMED_VEHICLE_SPEEDS_KMH: Dict[str, float] = {
+    "Motorcycle": 40.0,
+    "Car": 45.0,
+    "Bus": 32.0,
+    "Truck": 26.0,
+    "Other": 35.0,
+}
+
 
 class JourneyService:
     """Provides route planning, corridor pathfinding, and vehicle risk profiling."""
@@ -34,11 +49,22 @@ class JourneyService:
         self,
         places_path: Path | None = None,
         graph_path: Path | None = None,
+        sorted_segments_path: Path | None = None,
     ) -> None:
         self.places_path = places_path or settings.places_path
         self.graph_path = graph_path or settings.corridor_graph_path
+        self.sorted_segments_path = sorted_segments_path or settings.sorted_segments_path
         self._places: List[JourneyPlace] = []
+        self._sorted_segment_ids: List[str] = []
         self._load_places()
+        self._load_sorted_segments()
+
+    def _load_sorted_segments(self) -> None:
+        """Loads monotonically chainage-ordered corridor segment IDs."""
+        if not self.sorted_segments_path.exists():
+            return
+        with open(self.sorted_segments_path, "r", encoding="utf-8") as f:
+            self._sorted_segment_ids = json.load(f)
 
     def _load_places(self) -> None:
         """Loads known landmarks from place_coordinates.csv."""
@@ -88,12 +114,16 @@ class JourneyService:
         """Returns the list of selectable origin/destination points along the corridor."""
         return self._places
 
-    def _find_nearest_feature_index(self, lat: float, lon: float, features: List[Any]) -> int:
+    def _find_nearest_sorted_segment_index(
+        self, lat: float, lon: float, features_by_id: Dict[str, Any]
+    ) -> int:
         best_idx = 0
         min_dist = float("inf")
-        for i, feat in enumerate(features):
+        for i, sid in enumerate(self._sorted_segment_ids):
+            feat = features_by_id.get(sid)
+            if not feat or not feat.geometry or not feat.geometry.coordinates:
+                continue
             coords = feat.geometry.coordinates
-            # Coords are [lon, lat]
             mid_lon = (coords[0][0] + coords[-1][0]) / 2.0
             mid_lat = (coords[0][1] + coords[-1][1]) / 2.0
             dist = math.hypot(lat - mid_lat, lon - mid_lon)
@@ -212,32 +242,25 @@ class JourneyService:
 
         # 2. Fetch corridor highway geometry
         geojson = corridor_service.get_corridor_geojson()
-        features = geojson.features
+        features_by_id = {f.id: f for f in geojson.features}
 
-        orig_idx = self._find_nearest_feature_index(origin_p.lat, origin_p.lon, features)
-        dest_idx = self._find_nearest_feature_index(dest_p.lat, dest_p.lon, features)
+        if not self._sorted_segment_ids:
+            self._sorted_segment_ids = [f.id for f in geojson.features]
+
+        orig_idx = self._find_nearest_sorted_segment_index(origin_p.lat, origin_p.lon, features_by_id)
+        dest_idx = self._find_nearest_sorted_segment_index(dest_p.lat, dest_p.lon, features_by_id)
 
         step = 1 if dest_idx >= orig_idx else -1
-        selected_features = features[orig_idx : dest_idx + step : step]
+        selected_segment_ids = self._sorted_segment_ids[orig_idx : dest_idx + step : step]
 
-        if not selected_features:
-            selected_features = features[:10]
+        if not selected_segment_ids:
+            selected_segment_ids = [self._sorted_segment_ids[orig_idx]]
 
-        # 3. Retrieve risk predictions for requested date
+        # 3. Retrieve risk predictions for requested date (no silent fallback date)
         risk_lookup: Dict[str, Any] = {}
-        is_historical = False
-        try:
-            risk_resp = risk_service.get_risk_by_date(req.date)
-            is_historical = True
-            for seg in risk_resp.segments:
-                risk_lookup[seg.segment_id] = seg
-        except HTTPException:
-            # If outside precomputed range, retrieve sample baseline date or handle gracefully
-            dates_info = risk_service.get_available_dates()
-            fallback_date = dates_info.sample_dates[0] if dates_info.sample_dates else "2023-07-09"
-            fallback_resp = risk_service.get_risk_by_date(fallback_date)
-            for seg in fallback_resp.segments:
-                risk_lookup[seg.segment_id] = seg
+        risk_resp = risk_service.get_risk_by_date(req.date)
+        for seg in risk_resp.segments:
+            risk_lookup[seg.segment_id] = seg
 
         # 4. Build itinerary items
         itinerary: List[SegmentItineraryItem] = []
@@ -247,37 +270,65 @@ class JourneyService:
         high_count = 0
         med_count = 0
         low_count = 0
+        unknown_count = 0
         bottlenecks: List[str] = []
 
-        for seq, feat in enumerate(selected_features, start=1):
-            sid = feat.id
+        for seq, sid in enumerate(selected_segment_ids, start=1):
+            feat = features_by_id.get(sid)
+            if not feat or not feat.properties:
+                logger.error(f"Data integrity error: Corridor segment '{sid}' is missing feature properties.")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Data integrity error: Corridor segment '{sid}' is missing required physical properties.",
+                )
+
             props = feat.properties
-            length_m = props.length_m if props else 250.0
-            slope = props.slope if props else 0.04
-            elevation_m = props.elevation_m if props else 1100.0
-            highway = props.highway if props else "trunk"
+            if (
+                props.length_m is None
+                or props.slope is None
+                or props.elevation_m is None
+                or not props.highway
+            ):
+                logger.error(f"Data integrity error: Segment '{sid}' is missing required static attributes: {props}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Data integrity error: Corridor segment '{sid}' is missing required physical properties.",
+                )
+
+            length_m = props.length_m
+            slope = props.slope
+            elevation_m = props.elevation_m
+            highway = props.highway
 
             total_dist_m += length_m
             max_slope = max(max_slope, slope * 100)
 
             r_item = risk_lookup.get(sid)
-            score = r_item.risk_score if r_item else 0.05
-            tier = r_item.risk_tier if r_item else "Low"
-
-            if score is not None:
+            if r_item is None or r_item.risk_score is None:
+                score = None
+                tier = "UNKNOWN"
+                unknown_count += 1
+                hazard_notes = "Segment risk data unavailable in precomputed model cache"
+            else:
+                score = r_item.risk_score
+                tier = r_item.risk_tier
                 scores.append(score)
 
-            hazard_notes = None
-            if tier == "High":
-                high_count += 1
-                hazard_notes = "High landslide susceptibility on current weather backtest"
-                if len(bottlenecks) < 4:
-                    bottlenecks.append(f"Segment {sid} ({elevation_m:.0f}m ASL)")
-            elif tier == "Medium":
-                med_count += 1
-                hazard_notes = "Elevated rockfall / waterlogging risk"
-            else:
-                low_count += 1
+                hazard_notes = None
+                if tier == "High":
+                    high_count += 1
+                    hazard_notes = "High landslide susceptibility on current weather backtest"
+                    if len(bottlenecks) < 4:
+                        bottlenecks.append(f"Segment {sid} ({elevation_m:.0f}m ASL)")
+                elif tier == "Medium":
+                    med_count += 1
+                    hazard_notes = "Elevated rockfall / waterlogging risk"
+                elif tier == "Low":
+                    low_count += 1
+                else:
+                    unknown_count += 1
+                    tier = "UNKNOWN"
+                    hazard_notes = "Segment risk status unclassified"
 
             itinerary.append(
                 SegmentItineraryItem(
@@ -294,17 +345,15 @@ class JourneyService:
             )
 
         total_distance_km = round(total_dist_m / 1000.0, 2)
-        if total_distance_km < 1.0:
-            total_distance_km = 4.5  # Mountain road realistic minimum
 
         # 5. Vehicle Advisory & Timings
         veh_advisory = self._build_vehicle_advisory(req.vehicle_type, max_slope)
-        speed = veh_advisory.speed_limit_kmh
+        speed = ASSUMED_VEHICLE_SPEEDS_KMH.get(veh_advisory.vehicle_type, 45.0)
 
         # Mountain base time (hours) = distance / speed
         base_hours = total_distance_km / max(speed, 10.0)
-        # Factor mountain curve delays + hazard buffer (2 mins per high risk segment)
-        delay_minutes = (high_count * 3) + (med_count * 1)
+        # Factor mountain curve delays + hazard buffer from modeling assumptions
+        delay_minutes = (high_count * ASSUMED_HIGH_RISK_DELAY_MINUTES) + (med_count * ASSUMED_MEDIUM_RISK_DELAY_MINUTES)
         total_minutes = int(math.ceil(base_hours * 60)) + delay_minutes
 
         # Calculate departure & arrival times
@@ -335,14 +384,18 @@ class JourneyService:
             except ValueError:
                 deadline_status = None
 
-        avg_score = sum(scores) / len(scores) if scores else 0.05
-        max_score = max(scores) if scores else 0.05
+        avg_score = round(sum(scores) / len(scores), 4) if scores else None
+        max_score = round(max(scores), 4) if scores else None
 
         overall_risk = "Low"
-        if high_count > 0 or max_score >= 0.35:
+        if high_count > 0 or (max_score is not None and max_score >= 0.35):
             overall_risk = "High"
-        elif med_count > 0 or max_score >= 0.10:
+        elif med_count > 0 or (max_score is not None and max_score >= 0.10):
             overall_risk = "Medium"
+        elif unknown_count > 0:
+            overall_risk = "Unknown"
+        else:
+            overall_risk = "Low"
 
         retrospective_notice = (
             f"Advisory route analysis for {req.date} using ST-GNN spatial-temporal graph neural network "
@@ -360,14 +413,20 @@ class JourneyService:
             deadline_status=deadline_status,
             total_distance_km=total_distance_km,
             estimated_travel_minutes=total_minutes,
+            travel_time_disclaimer=(
+                "Estimated transit time calculated from assumed vehicle speeds and hazard buffers; "
+                "not measured live telemetry."
+            ),
             vehicle_advisory=veh_advisory,
             overall_route_risk=overall_risk,
-            max_risk_score=round(max_score, 4),
-            average_risk_score=round(avg_score, 4),
+            max_risk_score=max_score,
+            average_risk_score=avg_score,
             total_route_segments=len(itinerary),
             high_risk_segments_count=high_count,
             medium_risk_segments_count=med_count,
             low_risk_segments_count=low_count,
+            unknown_segments_count=unknown_count,
+            is_incomplete_data=unknown_count > 0,
             bottlenecks=bottlenecks,
             historical_disruptions_on_route=high_count + med_count,
             retrospective_notice=retrospective_notice,

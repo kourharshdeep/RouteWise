@@ -39,7 +39,7 @@ class RiskMetadata(BaseModel):
         "They do not guarantee road openness or safety."
     )
     requested_date: str = Field(..., description="Requested evaluation date (YYYY-MM-DD)")
-    generated_at: str = Field(..., description="Cache generation timestamp")
+    generated_at: Optional[str] = Field(None, description="Cache generation timestamp")
 
 
 class CorridorRiskResponse(BaseModel):
