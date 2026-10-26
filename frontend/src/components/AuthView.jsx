@@ -19,21 +19,18 @@ export default function AuthView({ onClose }) {
     {
       label: 'Public Commuter',
       email: 'demo@routewise.ai',
-      password: 'routewise2026',
       desc: 'Dr. Kabir Sharma • Personal Car Travel',
       icon: <Car size={16} />,
     },
     {
       label: 'Freight Logistics',
       email: 'logistics@routewise.ai',
-      password: 'routewise2026',
       desc: 'Tariq Ahmad • Kashmir Freight Heavy Truck',
       icon: <Truck size={16} />,
     },
     {
       label: 'Highway Patrol',
       email: 'patrol@routewise.ai',
-      password: 'routewise2026',
       desc: 'Inspector Amit Rathore • NH-44 Sector Unit',
       icon: <Shield size={16} />,
     },
@@ -71,18 +68,9 @@ export default function AuthView({ onClose }) {
     }
   };
 
-  const handleDemoClick = async (account) => {
+  const handleDemoClick = (account) => {
     setEmail(account.email);
-    setPassword(account.password);
-    try {
-      setIsSubmitting(true);
-      await login(account.email, account.password);
-      if (onClose) onClose();
-    } catch (err) {
-      // handled
-    } finally {
-      setIsSubmitting(false);
-    }
+    setPassword('');
   };
 
   return (

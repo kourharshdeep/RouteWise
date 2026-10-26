@@ -21,7 +21,7 @@ export default function SignInView({ theme, setTheme }) {
   const location = useLocation();
   const { login, authError, setAuthError } = useAuth();
 
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(location.state?.prefillEmail || '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -62,20 +62,10 @@ export default function SignInView({ theme, setTheme }) {
     }
   };
 
-  const handleDemoFill = async (demoEmail, demoPwd) => {
+  const handleDemoEmailFill = (demoEmail) => {
     setEmail(demoEmail);
-    setPassword(demoPwd);
+    setPassword('');
     setFieldErrors({});
-    try {
-      setIsSubmitting(true);
-      setAuthError(null);
-      await login(demoEmail, demoPwd);
-      navigate(destination, { replace: true });
-    } catch (err) {
-      // Handled
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   return (
@@ -197,7 +187,7 @@ export default function SignInView({ theme, setTheme }) {
               <button
                 type="button"
                 className="demo-card-btn"
-                onClick={() => handleDemoFill('demo@routewise.ai', 'routewise2026')}
+                onClick={() => handleDemoEmailFill('demo@routewise.ai')}
                 disabled={isSubmitting}
               >
                 <div className="demo-card-header">
@@ -210,7 +200,7 @@ export default function SignInView({ theme, setTheme }) {
               <button
                 type="button"
                 className="demo-card-btn"
-                onClick={() => handleDemoFill('logistics@routewise.ai', 'routewise2026')}
+                onClick={() => handleDemoEmailFill('logistics@routewise.ai')}
                 disabled={isSubmitting}
               >
                 <div className="demo-card-header">

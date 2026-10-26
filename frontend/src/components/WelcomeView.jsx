@@ -42,17 +42,8 @@ export default function WelcomeView({ theme, setTheme, health }) {
     }
   };
 
-  const handleDemoLogin = async (email, password) => {
-    try {
-      setIsGuestLoading(true);
-      setGuestError(null);
-      await login(email, password);
-      navigate(destination, { replace: true });
-    } catch (err) {
-      setGuestError(err.message || 'Demo login failed.');
-    } finally {
-      setIsGuestLoading(false);
-    }
+  const handleDemoSelect = (demoEmail) => {
+    navigate('/auth/signin', { state: { prefillEmail: demoEmail, from: destination } });
   };
 
   const isHealthy = health && health.status === 'ok';
@@ -223,7 +214,7 @@ export default function WelcomeView({ theme, setTheme, health }) {
             <button
               type="button"
               className="demo-card-btn"
-              onClick={() => handleDemoLogin('demo@routewise.ai', 'routewise2026')}
+              onClick={() => handleDemoSelect('demo@routewise.ai')}
               disabled={isGuestLoading}
             >
               <div className="demo-card-header">
@@ -236,7 +227,7 @@ export default function WelcomeView({ theme, setTheme, health }) {
             <button
               type="button"
               className="demo-card-btn"
-              onClick={() => handleDemoLogin('logistics@routewise.ai', 'routewise2026')}
+              onClick={() => handleDemoSelect('logistics@routewise.ai')}
               disabled={isGuestLoading}
             >
               <div className="demo-card-header">
@@ -249,7 +240,7 @@ export default function WelcomeView({ theme, setTheme, health }) {
             <button
               type="button"
               className="demo-card-btn"
-              onClick={() => handleDemoLogin('patrol@routewise.ai', 'routewise2026')}
+              onClick={() => handleDemoSelect('patrol@routewise.ai')}
               disabled={isGuestLoading}
             >
               <div className="demo-card-header">

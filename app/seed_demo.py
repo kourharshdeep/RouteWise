@@ -51,6 +51,14 @@ def seed_simulated_data() -> None:
     patrol_email = "patrol@routewise.ai"
     patrol_name = "Inspector Amit Rathore (NH-44 Patrol)"
     patrol_pwd = settings.demo_patrol_password
+    user_pwd = settings.demo_user_password
+    if not patrol_pwd or not user_pwd:
+        print(
+            "Error: Both DEMO_PATROL_PASSWORD and DEMO_USER_PASSWORD environment variables must be configured.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     patrol_profile = auth_service.create_patrol_user(
         email=patrol_email,
         name=patrol_name,
@@ -61,7 +69,6 @@ def seed_simulated_data() -> None:
     # 3. Seed Demo Commuter Account
     user_email = "demo@routewise.ai"
     user_name = "Dr. Kabir Sharma"
-    user_pwd = "routewise2026"
     with auth_service._get_connection() as conn:
         salt = auth_service._hash_password(user_pwd, "salt")[:32]
         pwd_hash = auth_service._hash_password(user_pwd, salt)
@@ -229,8 +236,9 @@ def seed_simulated_data() -> None:
         conn.commit()
 
     print("Demo operational data successfully seeded (is_simulated=1):")
-    print(f"  - Patrol Officer: {patrol_email} (Password: {patrol_pwd})")
-    print(f"  - Public Commuter: {user_email} (Password: {user_pwd})")
+    print(f"  - Patrol Officer: {patrol_email}")
+    print(f"  - Public Commuter: {user_email}")
+    print(f"  - Freight Logistics: {logistics_email}")
     print(f"  - 5 simulated field reports snapped along NH-44 Ramban-Banihal.")
     print("All simulated items are visibly badged 'Simulated demo data' in the UI.")
 

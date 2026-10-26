@@ -24,8 +24,8 @@ To populate realistic sample reports and provision demo accounts without manual 
 python -m app.seed_demo
 ```
 *Seeded Accounts Created:*
-- **Demo Commuter:** `commuter@routewise.local` / `Commuter2026!` (Role: `user`)
-- **Demo Patrol Officer:** `patrol.ramban@routewise.local` / `DemoPatrol2026!` (Role: `patrol`, flagged `is_simulated = 1`)
+- **Demo Commuter:** `demo@routewise.ai` (Password configured via `DEMO_USER_PASSWORD` in `.env`, Role: `user`)
+- **Demo Patrol Officer:** `patrol@routewise.ai` (Password configured via `DEMO_PATROL_PASSWORD` in `.env`, Role: `patrol`, flagged `is_simulated = 1`)
 
 *(To purge all simulated demo reports and accounts at any time, run: `python -m app.seed_demo --clear`)*
 
@@ -63,7 +63,7 @@ python -m app.seed_demo
 
 ### Action & Navigation
 1. Click **"Exit Guest Session"** or navigate to `/auth/signin`.
-2. Sign in as commuter: `commuter@routewise.local` / `Commuter2026!`.
+2. Sign in as commuter: `demo@routewise.ai` using the password configured in `DEMO_USER_PASSWORD`.
 3. Open the **Incident Reporter** tab (`/reports`).
 
 ### What to Point Out & Demonstrate
@@ -88,8 +88,8 @@ python -m app.seed_demo
 
 ### Action & Navigation
 1. Sign out and sign in using the demo patrol officer account:
-   - Email: `patrol.ramban@routewise.local`
-   - Password: `DemoPatrol2026!`
+   - Email: `patrol@routewise.ai`
+   - Password: password configured via `DEMO_PATROL_PASSWORD` in `.env`
 2. Notice that the sidebar now displays the privileged **"Patrol Operations"** navigation item with a shield icon. Click it (`/patrol`).
 
 ### What to Point Out & Demonstrate
