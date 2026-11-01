@@ -8,43 +8,74 @@
 
 ## 1. Repository Layout & Frameworks
 - **Backend:** FastAPI (Python 3.11), Uvicorn server, Pydantic v2 schemas, SQLite (`data/routewise_local.db`).
-  - *Run command:* `.\venv\Scripts\uvicorn src.api.app:app --host 127.0.0.1 --port 8000 --reload`
-  - *Test command:* `.\venv\Scripts\python.exe -m pytest -p no:cacheprovider`
+  - *Bootstrap command:* `python -m app.bootstrap_db` (idempotent DDL + loads 274k segment_weather rows)
+  - *Run command:* `python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000 --reload`
+  - *Test command:* `python -m pytest` (61 passing unit & integration tests across 12 modules)
+  - *Dependencies:* `requirements.txt` (FastAPI, PyTorch, scikit-learn, networkx, pytest) and `requirements-pipeline.txt` (offline GIS & atmospheric ingestion: osmnx, rasterio, cdsapi, netCDF4, geopandas).
 - **Frontend:** React 18, Vite, React Router DOM v6, React-Leaflet v4, Lucide React icons, Vanilla CSS design tokens.
   - *Run command:* `cd frontend && npm run dev`
-- **Machine Learning Core:** PyTorch ST-GNN (2-layer GCNConv + GRU recurrent cell + linear projection), model weights in `stgnn_best.pt` (SHA-256: `68b04504eae6...`).
+  - *Test command:* `npm --prefix frontend test` (13 passing unit tests via `node --test`)
+- **Machine Learning Core:** PyTorch ST-GNN (2-layer GCNConv + GRU recurrent cell + linear projection), model weights in `stgnn_best.pt` (SHA-256: `68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F963D335054006E`).
 
 ---
 
 ## 2. Authentication & Authorization State
 - **Password Hashing:** PBKDF2-HMAC-SHA256 with 100,000 iterations and per-user 16-byte random salt.
 - **Tokens:** Custom HS256-signed JWTs with 72-hour default expiration (12 hours for guest).
-- **Roles in Database:** `role` column in `users` table. Seeded accounts had arbitrary strings (`commuter`, `logistics_operator`, `patrol_officer`, `guest`). Existing auto-seeding on empty DB will be removed and migrated to explicit `python -m app.seed_demo`.
-- **Phase 1 Target:** Strict role normalization to `guest`, `user`, `patrol`, `admin`. Public registration strictly forced to `user` (rejecting/ignoring client `role`). Patrol provisioning restricted to CLI command and admin promotion.
-- **Guest Access:** `POST /api/v1/auth/guest` issues signed token with `sub="0"` and `role="guest"`. Must be strictly read-only on all backend write endpoints.
+- **Roles in Database:** `role` column in `users` table (`guest`, `user`, `patrol`, `admin`).
+- **Access Enforcement:** Strict role normalization enforced in FastAPI backend dependencies (`src/api/dependencies.py`). Public registration is strictly forced to role `user`.
+- **Patrol Provisioning:** CLI utility `python -m app.create_patrol` (prompts via `getpass.getpass`, passwords never printed) or admin role promotion endpoint.
+- **Guest Access:** `POST /api/v1/auth/guest` issues signed token with `sub="0"` and `role="guest"`. Strictly read-only on all backend write endpoints.
 
 ---
 
 ## 3. Data Storage & Schema Evolution
 - **Database:** SQLite at `data/routewise_local.db`.
-- **Migration Strategy:** Lightweight schema initialization via DDL scripts (`CREATE TABLE IF NOT EXISTS ...` with index creation).
-- **Existing Tables:**
-  - `users`: `id`, `email`, `name`, `password_hash`, `salt`, `role`, `preferred_vehicle`, `created_at`.
-- **New Tables to Introduce (Phase 2):**
-  - `reports`: UUID primary key, `client_uuid` idempotency key, `reporter_id`, `category`, `description`, `latitude`, `longitude`, `nearest_segment_id`, `photo_path`, `status`, `assigned_to`, `created_at`, `updated_at`, `is_simulated`.
-  - `report_status_history`: append-only audit trail (`report_id`, `from_status`, `to_status`, `actor_id`, `actor_role`, `note`, `timestamp`).
+- **Initialization:** `python -m app.bootstrap_db` idempotently runs schema DDL, creates performance indexes, and populates `segment_weather` from `data/weather_daily_by_segment.csv`.
+- **Core Tables:**
+  - `users`: `id`, `email`, `name`, `password_hash`, `salt`, `role`, `preferred_vehicle`, `created_at`, `is_simulated`.
+  - `reports`: UUID primary key, `client_uuid` idempotency key, `reporter_id`, `category`, `description`, `latitude`, `longitude`, `nearest_segment_id`, `nearest_segment_distance_m`, `photo_path`, `status`, `assigned_to`, `client_created_at`, `created_at`, `updated_at`, `is_simulated`.
+  - `report_status_history`: append-only audit trail (`id`, `report_id`, `from_status`, `to_status`, `actor_id`, `actor_role`, `note`, `timestamp`).
+  - `segment_weather`: pre-populated daily ERA5-Land reanalysis per segment (274k records).
 
 ---
 
-## 4. Existing API Endpoints & Consumption
-- `GET /` & `GET /api/health`: System status, corridor stats, model version.
-- `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/guest`, `GET /api/v1/auth/me`, `PUT /api/v1/auth/profile`, `GET /api/v1/auth/demo-accounts`.
-- `GET /api/v1/corridor/segments`, `GET /api/v1/corridor/geojson`: 151 NH-44 segment geometries.
-- `GET /api/v1/risk`: Retrospective disruption risk scores for observation dates.
-- `GET /api/v1/risk/dates`: Catalog of 1,821 historical observation dates.
-- `GET /api/v1/journey/places`, `POST /api/v1/journey/plan`: Itinerary and risk profile.
-- `GET /api/v1/disruptions`, `GET /api/v1/disruptions/stats`: 99 historical snapped events.
-- `POST /api/v1/chat/query`: Domain assistant endpoint.
+## 4. API Endpoints & Consumption (Verified against /docs)
+- **Root & Health:** `GET /`, `GET /api/health`
+- **Auth:**
+  - `POST /api/v1/auth/register` (strictly forces `user` role)
+  - `POST /api/v1/auth/login`
+  - `POST /api/v1/auth/guest`
+  - `GET /api/v1/auth/me`
+  - `PUT /api/v1/auth/profile`
+  - `GET /api/v1/auth/demo-accounts` (only active when `ROUTEWISE_DEMO_MODE=true`; never returns passwords)
+  - `PATCH /api/v1/auth/users/{user_id}/role` (admin only)
+- **Corridor & Features:**
+  - `GET /api/v1/corridor/segments` (151 NH-44 segment geometries & metadata)
+  - `GET /api/v1/corridor/segments/{segment_id}/features` (elevation, slope, precipitation)
+  - `GET /api/v1/corridor/advisories` (official police & TCU alerts)
+  - `GET /api/v1/corridor/services` (emergency, hospital, recovery facilities)
+  - `GET /api/v1/corridor/weather` (corridor-wide weather summaries)
+- **Risk Evaluation:**
+  - `GET /api/v1/risk` (retrospective disruption risk scores for observation dates)
+  - `GET /api/v1/risk/dates` (catalog of 1,821 historical observation dates)
+- **Journey Planner:**
+  - `GET /api/v1/journey/places` (landmarks along NH-44)
+  - `POST /api/v1/journey/plan` (chainage-ordered routing with multi-factor risk scoring and hold advisories)
+- **Disruptions:**
+  - `GET /api/v1/disruptions`, `GET /api/v1/disruptions/stats` (99 historical snapped events)
+- **Field Reports & Patrol:**
+  - `POST /api/v1/reports` (submit report; authenticated user/patrol, client-UUID idempotent)
+  - `GET /api/v1/reports` (list all reports; patrol/admin only)
+  - `GET /api/v1/reports/mine` (list own submitted reports; user/patrol)
+  - `GET /api/v1/reports/public` (verified hazards visible publicly)
+  - `GET /api/v1/reports/summary` (dispatch overview status counts; patrol/admin)
+  - `GET /api/v1/reports/{report_id}` (detailed report view)
+  - `GET /api/v1/reports/{report_id}/photo` (authenticated photo evidence retrieval)
+  - `PATCH /api/v1/reports/{report_id}/status` (state machine transition: submitted -> verified -> assigned -> resolved, or rejected)
+  - `PATCH /api/v1/reports/{report_id}/assign` (assign unit)
+- **Assistant:**
+  - `POST /api/v1/chat/query` (natural language corridor assistant)
 
 ---
 

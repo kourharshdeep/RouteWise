@@ -8,10 +8,13 @@ This script outlines the exact live demonstration flow for evaluators and stakeh
 
 Before starting the evaluation, ensure the local environment is prepared and clean:
 
-### Step 1: Start Backend & Frontend Services
+### Step 1: Database Bootstrap & Service Launch
 ```bash
+# Prepare database tables and load segment weather data (first-time setup)
+python -m app.bootstrap_db
+
 # Terminal 1 - Backend (FastAPI on Port 8000)
-.\venv\Scripts\python.exe -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --reload
+.\venv\Scripts\python.exe -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000 --reload
 
 # Terminal 2 - Frontend (Vite Dev Server on Port 5173)
 cd frontend
