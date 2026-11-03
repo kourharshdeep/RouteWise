@@ -65,6 +65,7 @@ function DashboardLayout({
   connectionStatus,
   onRefreshLive,
   isLiveUpdated,
+  lastRouteUpdate,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -202,7 +203,13 @@ function DashboardLayout({
             />
             <Route
               path="journey"
-              element={<JourneyPlanner onNavigateToMap={() => navigate("/map")} />}
+              element={
+                <JourneyPlanner
+                  onNavigateToMap={() => navigate("/map")}
+                  mode={dashboardMode}
+                  lastRouteUpdate={lastRouteUpdate}
+                />
+              }
             />
             <Route
               path="map"
@@ -327,6 +334,7 @@ function AppContent() {
   const [liveStatus, setLiveStatus] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState("connected"); // 'connected' | 'lost'
   const [isLiveUpdated, setIsLiveUpdated] = useState(false);
+  const [lastRouteUpdate, setLastRouteUpdate] = useState(null);
 
   // Mode change handler
   const handleModeChange = async (newMode) => {
@@ -427,6 +435,24 @@ function AppContent() {
         fetchLiveStatus().then((d) => isMounted && setLiveStatus(d)).catch(() => {});
         setIsLiveUpdated(true);
         setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+      });
+
+      es.addEventListener("route_update", (e) => {
+        if (!isMounted) return;
+        try {
+          const parsed = JSON.parse(e.data);
+          const d = new Date(parsed.timestamp || Date.now());
+          const hh = String(d.getHours()).padStart(2, "0");
+          const mm = String(d.getMinutes()).padStart(2, "0");
+          setLastRouteUpdate({
+            time: `${hh}:${mm}`,
+            reason: parsed.reason || "hazard_update",
+            eventId: parsed.event_id,
+            timestamp: parsed.timestamp || new Date().toISOString(),
+          });
+        } catch (err) {
+          console.debug("SSE route_update parse error:", err);
+        }
       });
 
       es.addEventListener("heartbeat", () => {
@@ -561,6 +587,7 @@ function AppContent() {
               connectionStatus={connectionStatus}
               onRefreshLive={handleRefreshLive}
               isLiveUpdated={isLiveUpdated}
+              lastRouteUpdate={lastRouteUpdate}
             />
           </ProtectedRoute>
         }

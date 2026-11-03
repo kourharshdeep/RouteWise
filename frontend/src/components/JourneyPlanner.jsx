@@ -18,7 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-export default function JourneyPlanner({ onNavigateToMap }) {
+export default function JourneyPlanner({ onNavigateToMap, mode = "historical", lastRouteUpdate = null }) {
   const {
     vehicleType,
     origin,
@@ -33,12 +33,14 @@ export default function JourneyPlanner({ onNavigateToMap }) {
     setArrivalDeadline,
     places,
     planResult,
+    previousPlanResult,
     isPlanning,
     planError,
     executePlan,
   } = useJourney();
 
   const [showItinerary, setShowItinerary] = useState(false);
+  const [showPreviousComparison, setShowPreviousComparison] = useState(false);
 
   const benchmarkDates = [
     { date: '2023-07-09', label: 'Monsoon Cloudburst (Benchmark)' },
@@ -50,9 +52,69 @@ export default function JourneyPlanner({ onNavigateToMap }) {
   const handlePlanSubmit = async (e) => {
     e.preventDefault();
     try {
-      await executePlan();
+      await executePlan({ mode });
     } catch (err) {
       // handled
+    }
+  };
+
+  const renderRecommendation = (rec, reason, blocking) => {
+    switch (rec) {
+      case 'HOLD':
+        return (
+          <div className="recommendation-banner hold" data-testid="recommendation-hold">
+            <AlertOctagon size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="badge badge-disconnected" style={{ fontSize: 13, fontWeight: 700 }}>HOLD — CORRIDOR CLOSED</span>
+                {blocking && blocking.length > 0 && (
+                  <span style={{ fontSize: 12, opacity: 0.9 }}>Blocked by segment(s): {blocking.join(', ')}</span>
+                )}
+              </div>
+              <p style={{ marginTop: 6, fontSize: 13, lineHeight: 1.4, margin: '6px 0 0 0' }}>{reason}</p>
+            </div>
+          </div>
+        );
+      case 'DELAY':
+        return (
+          <div className="recommendation-banner delay" data-testid="recommendation-delay">
+            <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <span className="badge badge-pill" style={{ color: '#f97316', borderColor: '#f97316', fontSize: 13, fontWeight: 700 }}>DELAY — HIGH HAZARD</span>
+              <p style={{ marginTop: 6, fontSize: 13, lineHeight: 1.4, margin: '6px 0 0 0' }}>{reason}</p>
+            </div>
+          </div>
+        );
+      case 'PROCEED_WITH_CAUTION':
+        return (
+          <div className="recommendation-banner caution" data-testid="recommendation-caution">
+            <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <span className="badge badge-pill" style={{ color: '#eab308', borderColor: '#eab308', fontSize: 13, fontWeight: 700 }}>PROCEED WITH CAUTION</span>
+              <p style={{ marginTop: 6, fontSize: 13, lineHeight: 1.4, margin: '6px 0 0 0' }}>{reason}</p>
+            </div>
+          </div>
+        );
+      case 'NO_DATA':
+        return (
+          <div className="recommendation-banner no_data" data-testid="recommendation-no-data">
+            <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <span className="badge badge-pill" style={{ color: 'var(--text-muted)', borderColor: 'var(--text-muted)', fontSize: 13, fontWeight: 700 }}>NO DATA — TELEMETRY UNKNOWN/STALE</span>
+              <p style={{ marginTop: 6, fontSize: 13, lineHeight: 1.4, margin: '6px 0 0 0' }}>{reason}</p>
+            </div>
+          </div>
+        );
+      default:
+        return (
+          <div className="recommendation-banner proceed" data-testid="recommendation-proceed">
+            <CheckCircle2 size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <span className="badge badge-connected" style={{ fontSize: 13, fontWeight: 700 }}>PROCEED — BASELINE CLEAR</span>
+              <p style={{ marginTop: 6, fontSize: 13, lineHeight: 1.4, margin: '6px 0 0 0' }}>{reason}</p>
+            </div>
+          </div>
+        );
     }
   };
 
@@ -141,6 +203,26 @@ export default function JourneyPlanner({ onNavigateToMap }) {
           </div>
         </div>
       </div>
+
+      {/* Real-time SSE Route Update Notification */}
+      {lastRouteUpdate && planResult && mode === 'live' && (
+        <div className="route-update-notification">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Clock size={16} style={{ color: 'var(--accent-primary)' }} />
+            <span>
+              <strong>Route updated at {lastRouteUpdate.time}</strong> — <em>{lastRouteUpdate.reason}</em>
+            </span>
+          </div>
+          <button
+            type="button"
+            className="sample-btn"
+            style={{ padding: '4px 10px', fontSize: 12 }}
+            onClick={() => executePlan({ mode })}
+          >
+            Re-evaluate Route
+          </button>
+        </div>
+      )}
 
       {/* Main Planning Form */}
       <form onSubmit={handlePlanSubmit} className="planner-form-card">
@@ -299,6 +381,103 @@ export default function JourneyPlanner({ onNavigateToMap }) {
             </div>
             <div>{getRiskBadge(planResult.overall_route_risk)}</div>
           </div>
+
+          {/* Operational Recommendation Banner (Task 4) */}
+          {planResult.recommendation && renderRecommendation(
+            planResult.recommendation,
+            planResult.recommendation_reason,
+            planResult.blocking_segments
+          )}
+
+          {/* Previous Result Comparison Drawer */}
+          {previousPlanResult && (
+            <div style={{ margin: '8px 0 12px 0' }}>
+              <button
+                type="button"
+                className="sample-btn"
+                style={{ fontSize: 12, padding: '4px 10px' }}
+                onClick={() => setShowPreviousComparison(!showPreviousComparison)}
+              >
+                {showPreviousComparison ? 'Hide Previous Route Comparison' : 'Compare with Previous Calculation'}
+              </button>
+              {showPreviousComparison && (
+                <div style={{ marginTop: 8, padding: 12, background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 6, fontSize: 12 }}>
+                  <strong>Previous Evaluation ({previousPlanResult.journey_date}):</strong>
+                  <div style={{ marginTop: 4 }}>
+                    Recommendation: <strong>{previousPlanResult.recommendation || 'N/A'}</strong> • Est. Transit: <strong>{previousPlanResult.estimated_travel_minutes} min</strong> • Risk: <strong>{previousPlanResult.overall_route_risk}</strong>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Side-by-Side Alternative Routes Presentation (Task 4) */}
+          {(planResult.baseline_route || planResult.risk_aware_route) && (
+            <div className="routes-comparison-section" style={{ margin: '14px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                  <Navigation size={15} /> Side-by-Side Route Alternatives & Trade-Offs
+                </h3>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Mode: {mode === 'live' ? 'Live Telemetry' : 'Historical Reanalysis'}
+                </span>
+              </div>
+
+              <div className="routes-comparison-grid">
+                {planResult.baseline_route && (
+                  <div className="route-alternative-card">
+                    <div className="route-alt-header">
+                      <strong style={{ fontSize: 13 }}>Distance-Only Baseline</strong>
+                      <span className={`badge ${planResult.baseline_route.is_passable ? 'badge-connected' : 'badge-disconnected'}`}>
+                        {planResult.baseline_route.is_passable ? 'Passable' : 'Blocked'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span>Distance: <strong>{planResult.baseline_route.total_distance_km} km</strong></span>
+                      <span>Est. Time: <strong>{planResult.baseline_route.estimated_travel_minutes} min</strong></span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Risk Assessment: <strong>{planResult.baseline_route.overall_risk}</strong>
+                      {planResult.baseline_route.max_risk_score !== null && (
+                        <span> (Max: {(planResult.baseline_route.max_risk_score * 100).toFixed(1)}%)</span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--text-dim)', margin: 0 }}>
+                      {planResult.baseline_route.trade_off_explanation}
+                    </p>
+                  </div>
+                )}
+
+                {planResult.risk_aware_route && (
+                  <div className="route-alternative-card highlight">
+                    <div className="route-alt-header">
+                      <strong style={{ fontSize: 13, color: 'var(--accent-primary)' }}>Risk-Aware Route (ST-GNN)</strong>
+                      <span className={`badge ${planResult.risk_aware_route.is_passable ? 'badge-connected' : 'badge-disconnected'}`}>
+                        {planResult.risk_aware_route.is_passable ? 'Passable' : 'Hold / Blocked'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span>Distance: <strong>{planResult.risk_aware_route.total_distance_km} km</strong></span>
+                      <span>Est. Time: <strong>{planResult.risk_aware_route.estimated_travel_minutes} min</strong></span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Risk Assessment: <strong>{planResult.risk_aware_route.overall_risk}</strong>
+                      {planResult.risk_aware_route.max_risk_score !== null && (
+                        <span> (Max: {(planResult.risk_aware_route.max_risk_score * 100).toFixed(1)}%)</span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: 12, fontStyle: 'italic', color: 'var(--text-dim)', margin: 0 }}>
+                      {planResult.risk_aware_route.trade_off_explanation}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border-color)', marginTop: 8 }}>
+                ℹ <strong>Single Physical Corridor Constraint:</strong> NH-44 Ramban–Banihal is a single linear mountain highway. Both baseline and risk-aware evaluations traverse the identical physical road segments; topological alternatives do not exist in this graph.
+              </div>
+            </div>
+          )}
 
           {/* Incomplete Data / Unknown Risk Alert Banner */}
           {planResult.is_incomplete_data && (

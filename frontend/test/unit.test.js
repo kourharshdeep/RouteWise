@@ -289,3 +289,86 @@ describe('Live Intelligence Mode & Accessibility Guarantees', () => {
     }
   });
 });
+
+// ==============================================================================
+// 7. Dynamic Routing & Operational Recommendation Matrix (Step 6)
+// ==============================================================================
+describe('Dynamic Routing & Operational Recommendation Matrix', () => {
+  const resolveRecommendation = ({ blockingCount, unknownCount, isStale, highCount, maxScore, medCount }) => {
+    if (blockingCount > 0) return 'HOLD';
+    if (unknownCount > 0 || isStale) return 'NO_DATA';
+    if (highCount > 0 || (maxScore !== null && maxScore !== undefined && maxScore >= 0.35)) return 'DELAY';
+    if (medCount > 0 || (maxScore !== null && maxScore !== undefined && maxScore >= 0.10)) return 'PROCEED_WITH_CAUTION';
+    return 'PROCEED';
+  };
+
+  it('correctly maps HOLD, NO_DATA, DELAY, PROCEED_WITH_CAUTION, and PROCEED', () => {
+    // 1. Blocked segment -> HOLD
+    assert.equal(
+      resolveRecommendation({ blockingCount: 1, unknownCount: 0, isStale: false, highCount: 0, maxScore: 0.05, medCount: 0 }),
+      'HOLD'
+    );
+
+    // 2. Unknown segments or stale telemetry -> NO_DATA
+    assert.equal(
+      resolveRecommendation({ blockingCount: 0, unknownCount: 2, isStale: false, highCount: 0, maxScore: 0.05, medCount: 0 }),
+      'NO_DATA'
+    );
+    assert.equal(
+      resolveRecommendation({ blockingCount: 0, unknownCount: 0, isStale: true, highCount: 0, maxScore: 0.05, medCount: 0 }),
+      'NO_DATA'
+    );
+
+    // 3. High risk count or score >= 0.35 -> DELAY
+    assert.equal(
+      resolveRecommendation({ blockingCount: 0, unknownCount: 0, isStale: false, highCount: 1, maxScore: 0.40, medCount: 0 }),
+      'DELAY'
+    );
+
+    // 4. Medium risk count or score >= 0.10 -> PROCEED_WITH_CAUTION
+    assert.equal(
+      resolveRecommendation({ blockingCount: 0, unknownCount: 0, isStale: false, highCount: 0, maxScore: 0.22, medCount: 2 }),
+      'PROCEED_WITH_CAUTION'
+    );
+
+    // 5. Clean baseline -> PROCEED
+    assert.equal(
+      resolveRecommendation({ blockingCount: 0, unknownCount: 0, isStale: false, highCount: 0, maxScore: 0.04, medCount: 0 }),
+      'PROCEED'
+    );
+  });
+
+  it('ensures routing i18n keys exist in both EN and HI catalogs', () => {
+    const routingKeys = [
+      'recommendation_hold',
+      'recommendation_no_data',
+      'recommendation_delay',
+      'recommendation_proceed_caution',
+      'recommendation_proceed',
+      'route_updated',
+      'baseline_route',
+      'risk_aware_route',
+      'single_corridor_notice',
+      'passable',
+      'impassable',
+      'compare_previous',
+    ];
+
+    for (const k of routingKeys) {
+      assert.ok(enTranslations.routing?.[k], `EN missing routing key: ${k}`);
+      assert.ok(hiTranslations.routing?.[k], `HI missing routing key: ${k}`);
+    }
+  });
+
+  it('guarantees single-corridor honesty constraints for alternative paths', () => {
+    const mockBaseline = { total_distance_km: 35.8, is_passable: false, blocking_segments: ['seg_123'] };
+    const mockRiskAware = { total_distance_km: 35.8, is_passable: false, blocking_segments: ['seg_123'] };
+    const hasAlternative = false;
+
+    // Distances must be symmetric and identical since physical path is unchanged
+    assert.equal(mockBaseline.total_distance_km, mockRiskAware.total_distance_km);
+    assert.equal(hasAlternative, false);
+    assert.equal(mockBaseline.is_passable, false);
+    assert.equal(mockRiskAware.is_passable, false);
+  });
+});

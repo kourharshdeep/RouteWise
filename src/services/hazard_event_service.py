@@ -240,6 +240,11 @@ class HazardEventService:
                 "action": action,
                 "event_id": event_id,
             })
+            live_broadcaster.broadcast_sync("route_update", {
+                "reason": f"hazard_{action}",
+                "event_id": event_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
             from src.services.live_risk_service import live_risk_service
             live_broadcaster.broadcast_sync("risk_update", live_risk_service.get_latest_live_risk())
             live_broadcaster.broadcast_sync("status", live_risk_service.get_live_status())
@@ -309,7 +314,7 @@ class HazardEventService:
             expires_iso,
         )
 
-        return {
+        res = {
             "id": event_id,
             "segment_id": segment_id,
             "hazard_type": norm_preset,

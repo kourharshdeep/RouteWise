@@ -228,6 +228,11 @@ class LiveRiskService:
                 "computed_at": computed_at_iso,
                 "segments_count": len(records),
             })
+            live_broadcaster.broadcast_sync("route_update", {
+                "reason": "risk_recomputed",
+                "as_of": target_date,
+                "timestamp": computed_at_iso,
+            })
             live_broadcaster.broadcast_sync("status", self.get_live_status())
         except Exception as e:
             logger.debug("Live risk broadcast skipped or failed: %s", e)

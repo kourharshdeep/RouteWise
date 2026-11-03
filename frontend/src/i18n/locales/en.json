@@ -197,5 +197,19 @@
     "simulated_events": "Active Simulated Events",
     "verified_events": "Active Verified Hazards",
     "refresh_now": "Refresh Live Telemetry"
+  },
+  "routing": {
+    "recommendation_hold": "HOLD",
+    "recommendation_no_data": "NO DATA",
+    "recommendation_delay": "DELAY",
+    "recommendation_proceed_caution": "PROCEED WITH CAUTION",
+    "recommendation_proceed": "PROCEED",
+    "route_updated": "Route updated at {time} - {reason}",
+    "baseline_route": "Distance-Only Baseline",
+    "risk_aware_route": "Risk-Aware Route",
+    "single_corridor_notice": "Single physical corridor: No alternative bypass exists on NH-44 Ramban–Banihal.",
+    "passable": "Passable",
+    "impassable": "Impassable / Hold",
+    "compare_previous": "Compare with Previous Route Calculation"
   }
 }

@@ -197,5 +197,19 @@
     "simulated_events": "सक्रिय सिमुलेटेड घटनाएं",
     "verified_events": "सक्रिय सत्यापित खतरे",
     "refresh_now": "लाइव टेलीमेट्री रीफ़्रेश करें"
+  },
+  "routing": {
+    "recommendation_hold": "रुकें (HOLD)",
+    "recommendation_no_data": "डेटा उपलब्ध नहीं (NO DATA)",
+    "recommendation_delay": "विलंब (DELAY)",
+    "recommendation_proceed_caution": "सावधानीपूर्वक आगे बढ़ें (PROCEED WITH CAUTION)",
+    "recommendation_proceed": "आगे बढ़ें (PROCEED)",
+    "route_updated": "मार्ग अद्यतन {time} पर - {reason}",
+    "baseline_route": "दूरी-आधारित आधार रेखा",
+    "risk_aware_route": "जोखिम-सजग मार्ग",
+    "single_corridor_notice": "एकल भौतिक गलियारा: NH-44 रामबन-बनिहाल पर कोई वैकल्पिक बाईपास मौजूद नहीं है।",
+    "passable": "मार्ग खुला",
+    "impassable": "अवरुद्ध / रुकें",
+    "compare_previous": "पिछले मार्ग परिकलन से तुलना करें"
   }
 }

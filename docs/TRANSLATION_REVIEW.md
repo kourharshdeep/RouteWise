@@ -82,4 +82,25 @@ The following strings were added for the Real-Time Intelligence dashboard, Serve
 | `live.verified_events` | `Active Verified Hazards` | `सक्रिय सत्यापित खतरे` | Verified patrol incident count |
 | `live.refresh_now` | `Refresh Live Telemetry` | `लाइव टेलीमेट्री रीफ़्रेश करें` | Manual trigger button |
 
+---
+
+## 7. Unreviewed Additions (Step 6 - Dynamic Route Recalculation)
+The following strings were added for dynamic route recalculation, operational journey recommendations, side-by-side alternative comparison, and single-corridor honesty disclosures, and are marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| `routing.recommendation_hold` | `HOLD` | `रुकें (HOLD)` | Route impassable due to closed segment |
+| `routing.recommendation_no_data` | `NO DATA` | `डेटा उपलब्ध नहीं (NO DATA)` | Missing or stale telemetry |
+| `routing.recommendation_delay` | `DELAY` | `विलंब (DELAY)` | High risk conditions |
+| `routing.recommendation_proceed_caution` | `PROCEED WITH CAUTION` | `सावधानीपूर्वक आगे बढ़ें (PROCEED WITH CAUTION)` | Medium hazard conditions |
+| `routing.recommendation_proceed` | `PROCEED` | `आगे बढ़ें (PROCEED)` | Low hazard baseline conditions |
+| `routing.route_updated` | `Route updated at {time} - {reason}` | `मार्ग अद्यतन {time} पर - {reason}` | Real-time SSE recomputation alert |
+| `routing.baseline_route` | `Distance-Only Baseline` | `दूरी-आधारित आधार रेखा` | Shortest path alternative |
+| `routing.risk_aware_route` | `Risk-Aware Route` | `जोखिम-सजग मार्ग` | Multi-objective router result |
+| `routing.single_corridor_notice` | `Single physical corridor: No alternative bypass exists on NH-44 Ramban–Banihal.` | `एकल भौतिक गलियारा: NH-44 रामबन-बनिहाल पर कोई वैकल्पिक बाईपास मौजूद नहीं है।` | Corridor topology truth disclosure |
+| `routing.passable` | `Passable` | `मार्ग खुला` | Segment clear for transit |
+| `routing.impassable` | `Impassable / Hold` | `अवरुद्ध / रुकें` | Segment blocked by hazard |
+| `routing.compare_previous` | `Compare with Previous Route Calculation` | `पिछले मार्ग परिकलन से तुलना करें` | Dynamic route change comparison |
+
+
 

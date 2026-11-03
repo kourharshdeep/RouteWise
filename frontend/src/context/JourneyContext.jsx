@@ -16,6 +16,7 @@ export function JourneyProvider({ children }) {
   
   const [places, setPlaces] = useState([]);
   const [planResult, setPlanResult] = useState(null);
+  const [previousPlanResult, setPreviousPlanResult] = useState(null);
   const [isPlanning, setIsPlanning] = useState(false);
   const [planError, setPlanError] = useState(null);
 
@@ -39,20 +40,27 @@ export function JourneyProvider({ children }) {
 
   const executePlan = useCallback(
     async (overrideParams = {}) => {
+      const mode = overrideParams.mode || 'historical';
       const payload = {
         origin: overrideParams.origin || origin,
         destination: overrideParams.destination || destination,
-        date: overrideParams.date || journeyDate,
+        date: mode === 'live' ? (overrideParams.date || undefined) : (overrideParams.date || journeyDate),
         departure_time: overrideParams.departureTime || departureTime,
         arrival_deadline: overrideParams.arrivalDeadline !== undefined ? overrideParams.arrivalDeadline : (arrivalDeadline || null),
         vehicle_type: overrideParams.vehicleType || vehicleType,
+        mode: mode,
       };
 
       try {
         setIsPlanning(true);
         setPlanError(null);
         const result = await planJourney(payload);
-        setPlanResult(result);
+        setPlanResult((prev) => {
+          if (prev) {
+            setPreviousPlanResult(prev);
+          }
+          return result;
+        });
         return result;
       } catch (err) {
         console.error('Plan journey error:', err);
@@ -93,6 +101,8 @@ export function JourneyProvider({ children }) {
         places,
         planResult,
         setPlanResult,
+        previousPlanResult,
+        setPreviousPlanResult,
         isPlanning,
         planError,
         executePlan,

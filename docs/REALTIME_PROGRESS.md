@@ -10,7 +10,7 @@ Resuming sessions must inspect this file and proceed from the first unfinished s
 | Step 2 | Real weather provider and validation | COMPLETED | 9923bef609d0f97b03071895c3da88ed52ca54cc |
 | Step 3 | Live risk service and endpoints | COMPLETED | 1d481e9cc6b59067dda9924084e1323b57a47e1a |
 | Step 4 | Hazard events and operational status | COMPLETED | f52833595f906db4e0dbedfd9ce89b5376fdb3b7 |
-| Step 5 | Live updates in the dashboard | COMPLETED | 706e3b4287d4bf1f7549cc17a86d50f8bf81e09b |
-| Step 6 | Dynamic route recalculation | PENDING | - |
+| Step 5 | Live updates in the dashboard | COMPLETED | d9e41e54a7a0b322467b7cb86d29c1053df3c103 |
+| Step 6 | Dynamic route recalculation | COMPLETED | in-commit |
 | Step 7 | Alerts and monitoring | PENDING | - |
 | Step 8 | Closing and verification | PENDING | - |
