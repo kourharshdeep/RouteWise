@@ -220,6 +220,18 @@ class LiveRiskService:
             predictions[0].status if predictions else "EMPTY",
         )
 
+        # Broadcast real-time SSE updates if broadcaster is active
+        try:
+            from src.services.live_broadcast_service import live_broadcaster
+            live_broadcaster.broadcast_sync("risk_update", {
+                "as_of": target_date,
+                "computed_at": computed_at_iso,
+                "segments_count": len(records),
+            })
+            live_broadcaster.broadcast_sync("status", self.get_live_status())
+        except Exception as e:
+            logger.debug("Live risk broadcast skipped or failed: %s", e)
+
         out = []
         for p in predictions:
             d = p.to_dict()
@@ -235,9 +247,12 @@ class LiveRiskService:
             latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
             latest_as_of = latest_row[0] if latest_row and latest_row[0] else None
 
-            if not latest_as_of:
-                # If no precomputed live risk, trigger initial computation
-                self.compute_live_risk()
+            if not latest_as_of and not getattr(self, "_is_computing", False):
+                self._is_computing = True
+                try:
+                    self.compute_live_risk()
+                finally:
+                    self._is_computing = False
                 latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
                 latest_as_of = latest_row[0] if latest_row and latest_row[0] else None
 

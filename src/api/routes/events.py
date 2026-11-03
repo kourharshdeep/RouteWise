@@ -72,3 +72,4 @@ def get_active_events(
     """Returns currently active verified and simulated hazard events. Public read access."""
     events = hazard_event_service.get_active_events(segment_id=segment_id)
     return [HazardEventItem(**e) for e in events]
+

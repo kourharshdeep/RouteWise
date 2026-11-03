@@ -16,6 +16,9 @@ import {
   fetchAvailableDates,
   fetchCorridorSegments,
   fetchCorridorRisk,
+  fetchLiveStatus,
+  fetchLiveRisk,
+  getLiveStreamUrl,
 } from "./services/api";
 
 import Navigation from "./components/Navigation";
@@ -56,6 +59,12 @@ function DashboardLayout({
   setIsLoading,
   error,
   setError,
+  dashboardMode,
+  setDashboardMode,
+  liveStatus,
+  connectionStatus,
+  onRefreshLive,
+  isLiveUpdated,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -182,6 +191,12 @@ function DashboardLayout({
                   onSelectSegment={handleSelectSegment}
                   geojson={geojson}
                   onNavigate={(tab) => navigate(`/${tab}`)}
+                  mode={dashboardMode}
+                  onModeChange={setDashboardMode}
+                  liveStatus={liveStatus}
+                  connectionStatus={connectionStatus}
+                  onRefreshLive={onRefreshLive}
+                  isLiveUpdated={isLiveUpdated}
                 />
               }
             />
@@ -199,6 +214,11 @@ function DashboardLayout({
                     onDateChange={handleDateChange}
                     availableDates={availableDates}
                     isLoading={isLoading}
+                    mode={dashboardMode}
+                    onModeChange={setDashboardMode}
+                    liveStatus={liveStatus}
+                    connectionStatus={connectionStatus}
+                    onRefreshLive={onRefreshLive}
                   />
 
                   <div className="main-grid" style={{ marginTop: 16 }}>
@@ -209,6 +229,8 @@ function DashboardLayout({
                       onSelectSegment={handleSelectSegment}
                       selectedSegmentId={selectedSegment?.id}
                       theme={theme}
+                      mode={dashboardMode}
+                      isLiveUpdated={isLiveUpdated}
                     />
 
                     <div className="sidebar">
@@ -300,6 +322,157 @@ function AppContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Real-Time Intelligence & SSE Stream States (Step 5)
+  const [dashboardMode, setDashboardMode] = useState("historical"); // 'historical' | 'live'
+  const [liveStatus, setLiveStatus] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState("connected"); // 'connected' | 'lost'
+  const [isLiveUpdated, setIsLiveUpdated] = useState(false);
+
+  // Mode change handler
+  const handleModeChange = async (newMode) => {
+    if (newMode === dashboardMode) return;
+    setDashboardMode(newMode);
+    if (newMode === "historical") {
+      try {
+        setIsLoading(true);
+        const histRisk = await fetchCorridorRisk(selectedDate);
+        setRiskData(histRisk);
+      } catch (err) {
+        console.error("Failed to restore historical risk:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const handleRefreshLive = async () => {
+    try {
+      setIsLoading(true);
+      const [statusRes, riskRes] = await Promise.all([
+        fetchLiveStatus(),
+        fetchLiveRisk(),
+      ]);
+      setLiveStatus(statusRes);
+      setRiskData(riskRes);
+      setIsLiveUpdated(true);
+      setTimeout(() => setIsLiveUpdated(false), 1400);
+    } catch (err) {
+      console.error("Failed to refresh live telemetry:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // SSE Stream subscription and 60-second fallback polling
+  useEffect(() => {
+    if (dashboardMode !== "live") return;
+
+    let isMounted = true;
+    let pollTimer = null;
+    let es = null;
+
+    async function initLive() {
+      try {
+        const [st, rk] = await Promise.all([
+          fetchLiveStatus().catch(() => null),
+          fetchLiveRisk().catch(() => null),
+        ]);
+        if (isMounted) {
+          if (st) setLiveStatus(st);
+          if (rk) setRiskData(rk);
+        }
+      } catch (err) {
+        console.warn("Initial live telemetry fetch failed:", err);
+      }
+    }
+
+    initLive();
+
+    try {
+      es = new EventSource(getLiveStreamUrl());
+
+      es.onopen = () => {
+        if (isMounted) setConnectionStatus("connected");
+      };
+
+      es.addEventListener("status", (e) => {
+        if (!isMounted) return;
+        try {
+          const parsed = JSON.parse(e.data);
+          setLiveStatus(parsed);
+        } catch (err) {
+          console.debug("SSE status parse error:", err);
+        }
+      });
+
+      es.addEventListener("risk_update", (e) => {
+        if (!isMounted) return;
+        try {
+          const parsed = JSON.parse(e.data);
+          if (parsed.segments && parsed.segments.length > 0) {
+            setRiskData(parsed);
+          } else {
+            fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
+          }
+          setIsLiveUpdated(true);
+          setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+        } catch (err) {
+          console.debug("SSE risk parse error:", err);
+        }
+      });
+
+      es.addEventListener("event_update", () => {
+        if (!isMounted) return;
+        fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
+        fetchLiveStatus().then((d) => isMounted && setLiveStatus(d)).catch(() => {});
+        setIsLiveUpdated(true);
+        setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+      });
+
+      es.addEventListener("heartbeat", () => {
+        if (isMounted) setConnectionStatus("connected");
+      });
+
+      es.onerror = () => {
+        if (!isMounted) return;
+        console.warn("SSE connection dropped, falling back to 60s polling...");
+        if (es) es.close();
+        setConnectionStatus("lost");
+
+        if (!pollTimer) {
+          pollTimer = setInterval(async () => {
+            if (!isMounted) return;
+            try {
+              const [st, rk] = await Promise.all([
+                fetchLiveStatus().catch(() => null),
+                fetchLiveRisk().catch(() => null),
+              ]);
+              if (isMounted) {
+                if (st) setLiveStatus(st);
+                if (rk) {
+                  setRiskData(rk);
+                  setIsLiveUpdated(true);
+                  setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+                }
+              }
+            } catch (err) {
+              console.warn("Fallback poll error:", err);
+            }
+          }, 60000);
+        }
+      };
+    } catch (err) {
+      console.warn("EventSource setup error:", err);
+      setConnectionStatus("lost");
+    }
+
+    return () => {
+      isMounted = false;
+      if (es) es.close();
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, [dashboardMode]);
+
   // Initial load: Health, Available Dates, and Corridor Highway GeoJSON
   useEffect(() => {
     async function initDashboard() {
@@ -382,6 +555,12 @@ function AppContent() {
               setIsLoading={setIsLoading}
               error={error}
               setError={setError}
+              dashboardMode={dashboardMode}
+              setDashboardMode={handleModeChange}
+              liveStatus={liveStatus}
+              connectionStatus={connectionStatus}
+              onRefreshLive={handleRefreshLive}
+              isLiveUpdated={isLiveUpdated}
             />
           </ProtectedRoute>
         }

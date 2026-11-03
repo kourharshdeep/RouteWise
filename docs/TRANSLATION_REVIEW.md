@@ -54,3 +54,32 @@ The following strings were added for Journey Planner correctness and incomplete 
 | `journey.assumed_speed_label` | `Estimated Transit Time (Assumed Speed)` | `अनुमानित पारगमन समय (कल्पित गति)` | Clarifies that transit duration is modeled, not telemetry |
 | `journey.date_out_of_range` | `Observation date is outside the supported historical window ({{minDate}} to {{maxDate}}).` | `अवलोकन तिथि समर्थित ऐतिहासिक सीमा ({{minDate}} से {{maxDate}}) से बाहर है।` | Date bounds error message |
 
+---
+
+## 6. Unreviewed Additions (Step 5 - Live Intelligence)
+The following strings were added for the Real-Time Intelligence dashboard, Server-Sent Events status indicators, distribution shift disclosures, and operational status representations, and are marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| `live.toggle_label` | `Operational Mode` | `परिचालन मोड` | Switch between Historical and Live |
+| `live.historical_mode` | `Historical Reanalysis` | `ऐतिहासिक विश्लेषण` | Default mode label |
+| `live.live_mode` | `Live Intelligence` | `लाइव इंटेलिजेंस` | Real-time streaming mode label |
+| `live.experimental_badge` | `Live data - Experimental - not validated` | `लाइव डेटा - प्रायोगिक - अप्रमाणित` | Mandatory distribution shift badge |
+| `live.experimental_notice` | `Live meteorological observations from Open-Meteo represent an unvalidated distribution shift from the ERA5-Land training dataset. Predictions are advisory relative-risk indices, not statistical disruption probabilities.` | `ओपन-मेटियो से लाइव मौसम संबंधी अवलोकन ERA5-लैंड प्रशिक्षण डेटासेट से एक अप्रमाणित वितरण बदलाव का प्रतिनिधित्व करते हैं। भविष्यवाणियां सलाहकारी सापेक्ष-जोखिम सूचकांक हैं, सांख्यिकीय व्यवधान संभावनाएं नहीं।` | Honest framing disclosure |
+| `live.last_updated` | `Last updated` | `अंतिम अद्यतन` | Telemetry timestamp label |
+| `live.data_age` | `Data age` | `डेटा आयु` | Hours elapsed since fetch |
+| `live.data_stale` | `Stale Data (>24h)` | `बासी डेटा (>24 घंटे)` | Amber stale indicator |
+| `live.connection_connected` | `Connected (Real-time Stream)` | `जुड़ा हुआ (रीयल-टाइम स्ट्रीम)` | SSE status indicator |
+| `live.connection_lost` | `Connection Lost - Polling Every 60s` | `कनेक्शन टूट गया - प्रत्येक 60 सेकंड में पुनः जांच जारी` | SSE disconnect fallback |
+| `live.unknown_segments` | `Unknown / Stale Telemetry` | `अज्ञात / बासी टेलीमेट्री` | Segment missing data label |
+| `live.operational_status` | `Operational Status` | `परिचालन स्थिति` | Derived operational status |
+| `live.status_open` | `Open` | `खुला` | Road passability status |
+| `live.status_caution` | `Caution` | `सावधानी` | Elevated risk advisory |
+| `live.status_restricted` | `Restricted` | `प्रतिबंधित` | Single-lane or hazard restriction |
+| `live.status_closed` | `Closed` | `बंद` | Complete closure |
+| `live.status_unknown` | `Unknown` | `अज्ञात` | Missing telemetry safe-fallback |
+| `live.simulated_events` | `Active Simulated Events` | `सक्रिय सिमुलेटेड घटनाएं` | Operator simulation overlay count |
+| `live.verified_events` | `Active Verified Hazards` | `सक्रिय सत्यापित खतरे` | Verified patrol incident count |
+| `live.refresh_now` | `Refresh Live Telemetry` | `लाइव टेलीमेट्री रीफ़्रेश करें` | Manual trigger button |
+
+

@@ -7,8 +7,13 @@ Honest Framing:
 """
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+import json
+import logging
 from typing import Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import StreamingResponse
 
 from src.api.schemas.live import (
     LiveRiskChangesResponse,
@@ -16,6 +21,9 @@ from src.api.schemas.live import (
     LiveStatusResponse,
 )
 from src.services.live_risk_service import live_risk_service
+from src.services.live_broadcast_service import live_broadcaster
+
+logger = logging.getLogger("routewise.live_routes")
 
 router = APIRouter(prefix="/v1/live", tags=["Real-Time Intelligence"])
 
@@ -42,3 +50,74 @@ def get_live_changes(
     """Returns risk predictions that were computed or modified after the given timestamp."""
     return LiveRiskChangesResponse(**live_risk_service.get_risk_changes(since=since))
 
+
+@router.get("/stream")
+async def get_live_stream(
+    request: Request,
+    heartbeat_interval: float = Query(20.0, description="Heartbeat interval in seconds (default 20.0s)"),
+    max_events: Optional[int] = Query(None, description="Optional cap on frames to emit before closing (useful for tests)"),
+):
+    """Server-Sent Events (SSE) live updates stream.
+
+    Yields real-time events for connected clients:
+    - initial: 'status' and 'risk_update'
+    - ongoing: 'risk_update', 'event_update', 'alert', 'route_update', 'status'
+    - keep-alive: 'heartbeat' every 20 seconds
+    """
+    queue = live_broadcaster.subscribe()
+
+    async def event_generator():
+        emitted = 0
+        try:
+            # 1. Emit initial state immediately upon connection
+            try:
+                status_data = live_risk_service.get_live_status()
+                yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
+                emitted += 1
+            except Exception as e:
+                logger.debug("Error generating initial status frame: %s", e)
+
+            if max_events is not None and emitted >= max_events:
+                return
+
+            try:
+                risk_data = live_risk_service.get_latest_live_risk()
+                yield f"event: risk_update\ndata: {json.dumps(risk_data)}\n\n"
+                emitted += 1
+            except Exception as e:
+                logger.debug("Error generating initial risk frame: %s", e)
+
+            if max_events is not None and emitted >= max_events:
+                return
+
+            # 2. Main event loop
+            while True:
+                if max_events is not None and emitted >= max_events:
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+                    event_type = msg.get("event", "message")
+                    data_str = json.dumps(msg.get("data", {}))
+                    yield f"event: {event_type}\ndata: {data_str}\n\n"
+                    emitted += 1
+                except asyncio.TimeoutError:
+                    hb = {
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "status": "alive",
+                    }
+                    yield f"event: heartbeat\ndata: {json.dumps(hb)}\n\n"
+                    emitted += 1
+        except (asyncio.CancelledError, GeneratorExit):
+            pass
+        finally:
+            live_broadcaster.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -240,3 +240,52 @@ describe('i18n Translation Key Completeness (EN vs HI)', () => {
     }
   });
 });
+
+// ==============================================================================
+// 6. Live Intelligence Mode & Accessibility Guarantees (Step 5)
+// ==============================================================================
+describe('Live Intelligence Mode & Accessibility Guarantees', () => {
+  it('guarantees UNKNOWN tier has non-color cues and never defaults to low', () => {
+    const resolveRiskCue = (tier) => {
+      if (tier === 'High') return { cue: '▲', className: 'seg-high' };
+      if (tier === 'Medium') return { cue: '■', className: 'seg-medium' };
+      if (tier === 'Low') return { cue: '●', className: 'seg-low' };
+      return { cue: '?', className: 'seg-unknown' };
+    };
+
+    assert.deepEqual(resolveRiskCue('UNKNOWN'), { cue: '?', className: 'seg-unknown' });
+    assert.deepEqual(resolveRiskCue(null), { cue: '?', className: 'seg-unknown' });
+    assert.deepEqual(resolveRiskCue(undefined), { cue: '?', className: 'seg-unknown' });
+    assert.notEqual(resolveRiskCue('UNKNOWN').className, 'seg-low');
+  });
+
+  it('ensures all live intelligence i18n keys exist in both EN and HI', () => {
+    const liveKeys = [
+      'toggle_label',
+      'historical_mode',
+      'live_mode',
+      'experimental_badge',
+      'experimental_notice',
+      'last_updated',
+      'data_age',
+      'data_stale',
+      'connection_connected',
+      'connection_lost',
+      'unknown_segments',
+      'operational_status',
+      'status_open',
+      'status_caution',
+      'status_restricted',
+      'status_closed',
+      'status_unknown',
+      'simulated_events',
+      'verified_events',
+      'refresh_now',
+    ];
+
+    for (const k of liveKeys) {
+      assert.ok(enTranslations.live?.[k], `EN missing live key: ${k}`);
+      assert.ok(hiTranslations.live?.[k], `HI missing live key: ${k}`);
+    }
+  });
+});

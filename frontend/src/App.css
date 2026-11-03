@@ -3243,6 +3243,19 @@ body,
   background-color: var(--risk-high);
 }
 
+.seg-unknown {
+  background-color: var(--risk-unknown, #64748b);
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.15) 2px,
+    rgba(255, 255, 255, 0.15) 4px
+  );
+  border: 1px dashed rgba(255, 255, 255, 0.35);
+}
+
+
 .seg-cues {
   font-size: 7px;
   color: rgba(0, 0, 0, 0.45);
@@ -4384,3 +4397,165 @@ body,
 
 
 
+
+/* ==============================================================================
+ * Real-Time Intelligence & Live Dashboard Styles (Step 5)
+ * ============================================================================== */
+
+@keyframes livePulseHighlight {
+  0% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7);
+    filter: brightness(1.25);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(56, 189, 248, 0.4);
+    filter: brightness(1.15);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+    filter: brightness(1.0);
+  }
+}
+
+.live-update-flash {
+  animation: livePulseHighlight 1.4s ease-out;
+}
+
+.live-experimental-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  transition: all 0.25s ease;
+}
+
+.live-experimental-banner.stale {
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+}
+
+.live-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.live-experimental-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(2, 132, 199, 0.25);
+  color: var(--accent-secondary);
+  border: 1px solid var(--accent-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.live-experimental-banner.stale .live-experimental-badge {
+  background: rgba(245, 158, 11, 0.25);
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.live-banner-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.live-banner-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.live-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 20px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.live-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.live-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.live-toggle-btn.active {
+  background: var(--accent-primary);
+  color: var(--text-on-accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.live-toggle-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.live-connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+
+.live-connection-indicator.connected {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success-border);
+}
+
+.live-connection-indicator.lost {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+}
+
+.live-connection-lost-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
+  font-size: 12px;
+  margin-bottom: 12px;
+}

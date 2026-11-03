@@ -12,6 +12,7 @@ import {
   ArrowRight,
   Cpu,
 } from 'lucide-react';
+import LiveBanner from './LiveBanner';
 import CorridorStrip from './CorridorStrip';
 import RiskDetailDrawer from './RiskDetailDrawer';
 import OfficialAdvisoriesCard from './OfficialAdvisoriesCard';
@@ -24,7 +25,14 @@ export default function Overview({
   selectedDate,
   selectedSegment,
   onSelectSegment,
+  mode = 'historical',
+  onModeChange,
+  liveStatus,
+  connectionStatus = 'connected',
+  onRefreshLive,
+  isLiveUpdated = false,
 }) {
+  const isLive = mode === 'live';
   const { t } = useTranslation();
   const isHealthy = health && health.status === 'ok';
   const summary = riskData?.summary;
@@ -42,6 +50,14 @@ export default function Overview({
 
   return (
     <div className="overview-container">
+      {/* Real-time Mode Switcher & Telemetry Bar */}
+      <LiveBanner
+        mode={mode}
+        onModeChange={onModeChange}
+        liveStatus={liveStatus}
+        connectionStatus={connectionStatus}
+        onRefresh={onRefreshLive}
+      />
       {/* Hero Welcome Banner */}
       <div className="overview-hero-card">
         <div className="hero-content">
@@ -92,6 +108,8 @@ export default function Overview({
         selectedDate={selectedDate}
         selectedSegmentId={effectiveSelectedSegId}
         onSelectSegment={handleSelectSegment}
+        mode={mode}
+        isLiveUpdated={isLiveUpdated}
       />
 
       {/* Snapshot Cards Row */}
@@ -99,7 +117,7 @@ export default function Overview({
         {/* Active Date Risk Snapshot */}
         <div className="card">
           <div className="card-title">
-            <span>Corridor Risk Snapshot ({selectedDate})</span>
+            <span>Corridor Risk Snapshot {isLive ? `(${t('live.live_mode')})` : `(${selectedDate})`}</span>
             <Layers size={16} style={{ color: 'var(--accent-secondary)' }} />
           </div>
 

@@ -160,6 +160,8 @@ class HazardEventService:
                         (eid, f"Field report transitioned to {status_value}", actor_id, now_iso),
                     )
                 conn.commit()
+            if existing:
+                self._broadcast_event_change("close", existing[0]["id"])
             return None
 
         # Verified or assigned reports create or refresh active event
@@ -225,9 +227,24 @@ class HazardEventService:
                         (event_id, actor_id, now_iso),
                     )
                 conn.commit()
+            self._broadcast_event_change("create_or_refresh", event_id)
             return event_id
 
         return None
+
+    def _broadcast_event_change(self, action: str, event_id: Optional[str] = None) -> None:
+        """Dispatches an SSE event notification and updated live risk payload."""
+        try:
+            from src.services.live_broadcast_service import live_broadcaster
+            live_broadcaster.broadcast_sync("event_update", {
+                "action": action,
+                "event_id": event_id,
+            })
+            from src.services.live_risk_service import live_risk_service
+            live_broadcaster.broadcast_sync("risk_update", live_risk_service.get_latest_live_risk())
+            live_broadcaster.broadcast_sync("status", live_risk_service.get_live_status())
+        except Exception as e:
+            logger.debug("Failed to dispatch SSE broadcast for hazard event: %s", e)
 
     def simulate_event(
         self,
@@ -306,6 +323,8 @@ class HazardEventService:
             "created_by": user_id,
             "created_at": now_iso,
         }
+        self._broadcast_event_change("simulate", event_id)
+        return res
 
     def clear_all_simulated_events(self, user_id: Optional[int] = None) -> int:
         """One-action removal of all simulated hazard events."""
@@ -328,6 +347,8 @@ class HazardEventService:
                 )
             conn.commit()
             logger.info("Cleared %d active simulated events.", len(sim_rows))
+            if sim_rows:
+                self._broadcast_event_change("clear_simulated")
             return len(sim_rows)
 
     def get_active_events(self, segment_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -427,3 +448,4 @@ class HazardEventService:
 
 
 hazard_event_service = HazardEventService()
+

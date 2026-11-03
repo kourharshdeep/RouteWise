@@ -44,3 +44,4 @@ class ClearSimulatedResponse(BaseModel):
     cleared_count: int
     status: str = "SUCCESS"
     message: str = "All active operator-simulated hazard events have been cleared."
+

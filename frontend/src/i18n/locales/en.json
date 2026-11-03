@@ -175,5 +175,27 @@
     "incomplete_data_notice": "{{count}} segment(s) on this route lack precomputed ST-GNN risk evaluations. Because missing data is never certified as safe, the overall route risk is designated as Unknown.",
     "assumed_speed_label": "Estimated Transit Time (Assumed Speed)",
     "date_out_of_range": "Observation date is outside the supported historical window ({{minDate}} to {{maxDate}})."
+  },
+  "live": {
+    "toggle_label": "Operational Mode",
+    "historical_mode": "Historical Reanalysis",
+    "live_mode": "Live Intelligence",
+    "experimental_badge": "Live data - Experimental - not validated",
+    "experimental_notice": "Live meteorological observations from Open-Meteo represent an unvalidated distribution shift from the ERA5-Land training dataset. Predictions are advisory relative-risk indices, not statistical disruption probabilities.",
+    "last_updated": "Last updated",
+    "data_age": "Data age",
+    "data_stale": "Stale Data (>24h)",
+    "connection_connected": "Connected (Real-time Stream)",
+    "connection_lost": "Connection Lost - Polling Every 60s",
+    "unknown_segments": "Unknown / Stale Telemetry",
+    "operational_status": "Operational Status",
+    "status_open": "Open",
+    "status_caution": "Caution",
+    "status_restricted": "Restricted",
+    "status_closed": "Closed",
+    "status_unknown": "Unknown",
+    "simulated_events": "Active Simulated Events",
+    "verified_events": "Active Verified Hazards",
+    "refresh_now": "Refresh Live Telemetry"
   }
 }

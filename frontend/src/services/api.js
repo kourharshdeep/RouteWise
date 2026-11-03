@@ -310,3 +310,40 @@ export async function fetchCorridorWeather(dateStr) {
   return res.json();
 }
 
+// 9. Real-Time Intelligence & Live Stream
+export async function fetchLiveStatus() {
+  const res = await fetch(`${API_BASE}/api/v1/live/status`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch live status (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function fetchLiveRisk() {
+  const res = await fetch(`${API_BASE}/api/v1/live/risk`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch live risk predictions (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function fetchLiveChanges(since) {
+  const url = since
+    ? `${API_BASE}/api/v1/live/changes?since=${encodeURIComponent(since)}`
+    : `${API_BASE}/api/v1/live/changes`;
+  const res = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch live changes (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export function getLiveStreamUrl() {
+  return `${API_BASE}/api/v1/live/stream`;
+}

@@ -49,6 +49,8 @@ export default function CorridorMap({
   theme = 'dark',
   selectedDate = '2023-07-09',
   isDrawerOpen = false,
+  mode = 'historical',
+  isLiveUpdated = false,
 }) {
   const { t } = useTranslation();
   const { isPatrol } = useAuth();
@@ -171,6 +173,7 @@ export default function CorridorMap({
     // Risk overlay mode (Semantic Tokens)
     let color = isLight ? '#64748b' : '#94a3b8'; // Unknown / Neutral
     let weight = 3.5;
+    let dashArray = undefined;
 
     if (tier === 'High') {
       color = isLight ? '#dc2626' : '#ef4444'; // var(--risk-high)
@@ -181,6 +184,9 @@ export default function CorridorMap({
     } else if (tier === 'Low') {
       color = isLight ? '#059669' : '#10b981'; // var(--risk-low)
       weight = isSelected ? 5.5 : 3.5;
+    } else {
+      dashArray = '5, 5';
+      weight = isSelected ? 6.0 : 3.5;
     }
 
     if (isSelected) weight += 2;
@@ -189,13 +195,14 @@ export default function CorridorMap({
       color,
       weight,
       opacity: isSelected ? 1.0 : 0.9,
+      dashArray,
     };
   };
 
   const casingColor = isLight ? '#ffffff' : '#0b0f19';
 
   return (
-    <div className="map-card" role="region" aria-label="NH-44 Corridor Leaflet Map">
+    <div className={`map-card ${isLiveUpdated ? "live-update-flash" : ""}`} role="region" aria-label="NH-44 Corridor Leaflet Map">
       {/* Map Header with Layer Toggles */}
       <div className="map-header">
         <div>
@@ -328,7 +335,20 @@ export default function CorridorMap({
                         <strong>Score:</strong>{' '}
                         {r?.risk_score !== null && r?.risk_score !== undefined
                           ? (r.risk_score * 100).toFixed(1) + '%'
-                          : 'N/A'}
+                          : 'N/A (Missing/Stale)'}
+                        {r?.operational_status && (
+                          <>
+                            <br />
+                            <strong>Status:</strong> {r.operational_status}
+                          </>
+                        )}
+                        {r?.active_events && r.active_events.length > 0 && (
+                          <>
+                            <br />
+                            <strong>Hazards:</strong>{' '}
+                            {r.active_events.map((e) => e.hazard_type).join(', ')}
+                          </>
+                        )}
                       </div>
                     </Tooltip>
                   </Polyline>
