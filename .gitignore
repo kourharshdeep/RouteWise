@@ -38,6 +38,7 @@ coverage/
 # ---------- User uploads (patrol report photos) ----------
 uploads/
 backend/uploads/
+data/uploads/
 media/
 
 # ---------- Large ML artifacts and raw data ----------

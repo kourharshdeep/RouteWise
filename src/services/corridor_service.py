@@ -174,6 +174,13 @@ class CorridorService:
                 ).fetchall()
 
             reports = [dict(r) for r in rep_rows]
+        except sqlite3.OperationalError as e:
+            if "no such table: segment_weather" in str(e).lower():
+                raise HTTPException(
+                    status_code=500,
+                    detail="Database table 'segment_weather' is missing. Please initialize the database with: python -m app.bootstrap_db",
+                )
+            raise
         finally:
             db_conn.close()
 
@@ -216,6 +223,13 @@ class CorridorService:
                 "SELECT segment_id, precip_mm, precip_7d_mm, temp_mean_c FROM segment_weather WHERE date = ?",
                 (date_str,),
             ).fetchall()
+        except sqlite3.OperationalError as e:
+            if "no such table: segment_weather" in str(e).lower():
+                raise HTTPException(
+                    status_code=500,
+                    detail="Database table 'segment_weather' is missing. Please initialize the database with: python -m app.bootstrap_db",
+                )
+            raise
         finally:
             db_conn.close()
 

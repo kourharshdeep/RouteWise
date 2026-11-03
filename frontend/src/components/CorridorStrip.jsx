@@ -28,7 +28,7 @@ export default function CorridorStrip({
     raw.forEach((s) => {
       lookup[s.segment_id] = s;
     });
-    return sortedSegmentIds.map((id) => lookup[id] || { segment_id: id, risk_score: 0, risk_tier: 'Low' });
+    return sortedSegmentIds.map((id) => lookup[id] || { segment_id: id, risk_score: null, risk_tier: 'UNKNOWN' });
   }, [riskData]);
 
   const handleKeyDown = (e, idx) => {
@@ -91,19 +91,24 @@ export default function CorridorStrip({
             <div className="strip-empty-placeholder">Loading 151 corridor segments...</div>
           ) : (
             segments.map((seg, idx) => {
-              const score = seg.risk_score ?? 0;
-              const tier = seg.risk_tier || 'Low';
+              const score = seg.risk_score;
+              const tier = seg.risk_tier || 'UNKNOWN';
               const isSelected = selectedSegmentId === seg.segment_id;
 
-              let tierClass = 'seg-low';
-              let accessibilityIcon = '●';
+              let tierClass = 'seg-unknown';
+              let accessibilityIcon = '?';
               if (tier === 'High') {
                 tierClass = 'seg-high';
                 accessibilityIcon = '▲';
               } else if (tier === 'Medium') {
                 tierClass = 'seg-medium';
                 accessibilityIcon = '■';
+              } else if (tier === 'Low') {
+                tierClass = 'seg-low';
+                accessibilityIcon = '●';
               }
+
+              const scoreLabel = score !== null && score !== undefined ? score.toFixed(3) : 'N/A';
 
               return (
                 <button
@@ -113,8 +118,8 @@ export default function CorridorStrip({
                   className={`corridor-seg-bar ${tierClass} ${isSelected ? 'selected' : ''}`}
                   onClick={() => onSelectSegment(seg.segment_id)}
                   onKeyDown={(e) => handleKeyDown(e, idx)}
-                  aria-label={`Segment ${idx + 1}: ${tier} risk, score ${score.toFixed(3)}`}
-                  title={`Segment ${idx + 1} (${seg.segment_id})\nRisk: ${tier} (${score.toFixed(3)})\nClick to inspect input features`}
+                  aria-label={`Segment ${idx + 1}: ${tier} risk, score ${scoreLabel}`}
+                  title={`Segment ${idx + 1} (${seg.segment_id})\nRisk: ${tier} (${scoreLabel})\nClick to inspect input features`}
                 >
                   <span className="seg-cues" aria-hidden="true">
                     {accessibilityIcon}

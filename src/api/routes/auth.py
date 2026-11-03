@@ -71,29 +71,31 @@ def promote_user_role(
 @router.get("/demo-accounts")
 def get_demo_accounts() -> List[Dict[str, Any]]:
     """Returns currently available demo accounts seeded for evaluation."""
+    if not settings.demo_mode:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo accounts listing is disabled. Set ROUTEWISE_DEMO_MODE=true in environment to enable.",
+        )
     accounts = []
     with auth_service._get_connection() as conn:
         rows = conn.execute(
             "SELECT email, name, role, preferred_vehicle, is_simulated FROM users WHERE is_simulated = 1"
         ).fetchall()
         for r in rows:
-            pwd = settings.demo_patrol_password if r["role"] == "patrol" else "routewise2026"
             accounts.append({
                 "name": r["name"],
                 "email": r["email"],
-                "password": pwd,
                 "role": r["role"],
                 "vehicle": r["preferred_vehicle"],
                 "is_simulated": bool(r["is_simulated"]),
             })
 
-    # If none seeded yet, provide clean 안내
+    # If none seeded yet, provide clean metadata
     if not accounts:
         return [
             {
                 "name": "Demo Patrol Officer (Unseeded)",
                 "email": "patrol@routewise.ai",
-                "password": settings.demo_patrol_password,
                 "role": "patrol",
                 "vehicle": "Patrol Vehicle",
                 "note": "Run 'python -m app.seed_demo' to seed simulated account and reports.",
@@ -102,11 +104,19 @@ def get_demo_accounts() -> List[Dict[str, Any]]:
             {
                 "name": "Demo Public Commuter (Unseeded)",
                 "email": "demo@routewise.ai",
-                "password": "routewise2026",
                 "role": "user",
                 "vehicle": "Car",
                 "note": "Run 'python -m app.seed_demo' to seed simulated account and reports.",
                 "is_simulated": True,
-            }
+            },
+            {
+                "name": "Demo Freight Logistics (Unseeded)",
+                "email": "logistics@routewise.ai",
+                "role": "user",
+                "vehicle": "Truck",
+                "note": "Run 'python -m app.seed_demo' to seed simulated account and reports.",
+                "is_simulated": True,
+            },
         ]
     return accounts
+

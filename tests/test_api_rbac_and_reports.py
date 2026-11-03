@@ -29,7 +29,7 @@ def seeded_tokens():
     # 2. User Token (Dr. Kabir Sharma)
     user_res = client.post(
         "/api/v1/auth/login",
-        json={"email": "demo@routewise.ai", "password": "routewise2026"},
+        json={"email": "demo@routewise.ai", "password": "TestUserPass123!"},
     )
     user_token = user_res.json()["access_token"]
     user_id = user_res.json()["user"]["id"]
@@ -37,7 +37,7 @@ def seeded_tokens():
     # 3. Patrol Token (Inspector Amit Rathore)
     patrol_res = client.post(
         "/api/v1/auth/login",
-        json={"email": "patrol@routewise.ai", "password": "DemoPatrol2026!"},
+        json={"email": "patrol@routewise.ai", "password": "TestPatrolPass123!"},
     )
     patrol_token = patrol_res.json()["access_token"]
     patrol_id = patrol_res.json()["user"]["id"]

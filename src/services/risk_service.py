@@ -154,7 +154,7 @@ class RiskService:
             model_version=meta_dict.get("model_version", "unknown"),
             thresholds=meta_dict.get("thresholds", {"tau_med": 0.10, "tau_high": 0.35}),
             requested_date=date_str,
-            generated_at=meta_dict.get("generated_at", datetime.utcnow().isoformat()),
+            generated_at=meta_dict.get("generated_at"),
         )
 
         summary = RiskSummary(

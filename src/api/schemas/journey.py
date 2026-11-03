@@ -66,15 +66,21 @@ class JourneyPlanResponse(BaseModel):
     deadline_status: Optional[str]  # "Achievable", "At Risk", "Exceeded"
     total_distance_km: float
     estimated_travel_minutes: int
+    travel_time_disclaimer: str = Field(
+        default="Estimated transit time calculated from assumed vehicle speeds and hazard buffers; not measured live telemetry."
+    )
     vehicle_advisory: VehicleAdvisory
-    overall_route_risk: str  # "Low", "Medium", "High"
-    max_risk_score: float
-    average_risk_score: float
+    overall_route_risk: str  # "Low", "Medium", "High", "Unknown"
+    max_risk_score: Optional[float] = None
+    average_risk_score: Optional[float] = None
     total_route_segments: int
     high_risk_segments_count: int
     medium_risk_segments_count: int
     low_risk_segments_count: int
+    unknown_segments_count: int = 0
+    is_incomplete_data: bool = False
     bottlenecks: List[str]
     historical_disruptions_on_route: int
     retrospective_notice: str
     itinerary: List[SegmentItineraryItem]
+

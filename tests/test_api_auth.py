@@ -18,12 +18,13 @@ def test_demo_accounts():
     data = res.json()
     assert len(data) >= 3
     assert any(u["email"] == "demo@routewise.ai" for u in data)
+    assert all("password" not in u for u in data)
 
 
 def test_login_demo_user():
     res = client.post(
         "/api/v1/auth/login",
-        json={"email": "demo@routewise.ai", "password": "routewise2026"},
+        json={"email": "demo@routewise.ai", "password": "TestUserPass123!"},
     )
     assert res.status_code == 200
     data = res.json()

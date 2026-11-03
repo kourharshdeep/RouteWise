@@ -70,6 +70,19 @@ export default function JourneyPlanner({ onNavigateToMap }) {
             <AlertTriangle size={14} /> Elevated Hazard Advisory
           </span>
         );
+      case 'unknown':
+        return (
+          <span
+            className="risk-tag"
+            style={{
+              background: 'rgba(156, 163, 175, 0.15)',
+              color: 'var(--text-muted)',
+              border: '1px solid rgba(156, 163, 175, 0.4)',
+            }}
+          >
+            <AlertTriangle size={14} /> Unknown Hazard Level (Incomplete Data)
+          </span>
+        );
       default:
         return (
           <span className="risk-tag risk-tag-low">
@@ -287,6 +300,26 @@ export default function JourneyPlanner({ onNavigateToMap }) {
             <div>{getRiskBadge(planResult.overall_route_risk)}</div>
           </div>
 
+          {/* Incomplete Data / Unknown Risk Alert Banner */}
+          {planResult.is_incomplete_data && (
+            <div
+              className="retrospective-banner"
+              style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                borderColor: 'rgba(239, 68, 68, 0.35)',
+                margin: '12px 0',
+              }}
+            >
+              <AlertOctagon size={16} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong style={{ color: 'var(--danger)' }}>Incomplete Hazard Assessment Notice:</strong>{' '}
+                {planResult.unknown_segments_count} segment(s) on this route lack precomputed ST-GNN risk evaluations.
+                Because missing data is never certified as safe, the overall route risk is designated as <strong>Unknown</strong>.
+                Exercise extreme caution when traversing unmonitored segments.
+              </div>
+            </div>
+          )}
+
           {/* Metrics Row */}
           <div className="results-metrics-grid">
             <div className="metric-box">
@@ -300,8 +333,8 @@ export default function JourneyPlanner({ onNavigateToMap }) {
               <span className="metric-value">
                 {Math.floor(planResult.estimated_travel_minutes / 60)}h {planResult.estimated_travel_minutes % 60}m
               </span>
-              <span className="metric-sub">
-                Depart: {planResult.departure_time} → Est. Arrive: {planResult.estimated_arrival_time}
+              <span className="metric-sub" title={planResult.travel_time_disclaimer}>
+                Depart: {planResult.departure_time} → Est: {planResult.estimated_arrival_time} (Assumed Speed)
               </span>
             </div>
 
@@ -311,16 +344,25 @@ export default function JourneyPlanner({ onNavigateToMap }) {
                 className="metric-value"
                 style={{
                   color:
-                    planResult.max_risk_score >= 0.35
+                    planResult.max_risk_score === null || planResult.max_risk_score === undefined
+                      ? 'var(--text-muted)'
+                      : planResult.max_risk_score >= 0.35
                       ? 'var(--risk-high)'
                       : planResult.max_risk_score >= 0.1
                       ? 'var(--risk-medium)'
                       : 'var(--risk-low)',
                 }}
               >
-                {(planResult.max_risk_score * 100).toFixed(1)}%
+                {planResult.max_risk_score !== null && planResult.max_risk_score !== undefined
+                  ? `${(planResult.max_risk_score * 100).toFixed(1)}%`
+                  : 'N/A'}
               </span>
-              <span className="metric-sub">Avg Route Risk: {(planResult.average_risk_score * 100).toFixed(1)}%</span>
+              <span className="metric-sub">
+                Avg Route Risk:{' '}
+                {planResult.average_risk_score !== null && planResult.average_risk_score !== undefined
+                  ? `${(planResult.average_risk_score * 100).toFixed(1)}%`
+                  : 'N/A'}
+              </span>
             </div>
 
             <div className="metric-box">
@@ -329,6 +371,11 @@ export default function JourneyPlanner({ onNavigateToMap }) {
                 <span style={{ color: 'var(--risk-high)' }}>{planResult.high_risk_segments_count} High</span> •{' '}
                 <span style={{ color: 'var(--risk-medium)' }}>{planResult.medium_risk_segments_count} Med</span> •{' '}
                 <span style={{ color: 'var(--risk-low)' }}>{planResult.low_risk_segments_count} Low</span>
+                {planResult.unknown_segments_count > 0 && (
+                  <>
+                    {' '}• <span style={{ color: 'var(--text-muted)' }}>{planResult.unknown_segments_count} Unknown</span>
+                  </>
+                )}
               </div>
               {planResult.arrival_deadline && (
                 <div style={{ marginTop: 4 }}>{getDeadlineBadge(planResult.deadline_status)}</div>
@@ -398,7 +445,9 @@ export default function JourneyPlanner({ onNavigateToMap }) {
                           ? 'var(--risk-high)'
                           : item.risk_tier === 'Medium'
                           ? 'var(--risk-medium)'
-                          : 'var(--risk-low)';
+                          : item.risk_tier === 'Low'
+                          ? 'var(--risk-low)'
+                          : 'var(--text-muted)';
                       return (
                         <tr key={item.segment_id}>
                           <td>{item.sequence}</td>
