@@ -22,9 +22,10 @@ import {
   UserPlus,
   AlertTriangle,
   Globe,
+  Bell,
 } from 'lucide-react';
 
-export default function Navigation({ theme, setTheme, health }) {
+export default function Navigation({ theme, setTheme, health, activeAlertCount = 0, onOpenAlerts }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -185,6 +186,20 @@ export default function Navigation({ theme, setTheme, health }) {
               हिन्दी
             </button>
           </div>
+
+          {/* Active Alerts Bell Button */}
+          <button
+            type="button"
+            className="alert-bell-btn"
+            onClick={onOpenAlerts}
+            title="Active Corridor Disruption Alerts"
+            aria-label={`Active Corridor Alerts (${activeAlertCount})`}
+          >
+            <Bell size={16} />
+            {activeAlertCount > 0 && (
+              <span className="alert-count-badge">{activeAlertCount}</span>
+            )}
+          </button>
 
           {/* Theme Switcher */}
           <label className="theme-switch" title="Toggle light/dark mode">

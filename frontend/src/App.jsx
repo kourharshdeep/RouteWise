@@ -19,6 +19,7 @@ import {
   fetchLiveStatus,
   fetchLiveRisk,
   getLiveStreamUrl,
+  fetchActiveAlerts,
 } from "./services/api";
 
 import Navigation from "./components/Navigation";
@@ -35,6 +36,7 @@ import WelcomeView from "./components/WelcomeView";
 import SignInView from "./components/SignInView";
 import SignUpView from "./components/SignUpView";
 import IncidentReporter from "./components/IncidentReporter";
+import AlertDrawer from "./components/AlertDrawer";
 import PatrolDashboard from "./components/PatrolDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -66,6 +68,11 @@ function DashboardLayout({
   onRefreshLive,
   isLiveUpdated,
   lastRouteUpdate,
+  alerts,
+  isAlertDrawerOpen,
+  setIsAlertDrawerOpen,
+  refreshAlerts,
+  onScenarioStepped,
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -198,6 +205,7 @@ function DashboardLayout({
                   connectionStatus={connectionStatus}
                   onRefreshLive={onRefreshLive}
                   isLiveUpdated={isLiveUpdated}
+                  onScenarioStepped={onScenarioStepped}
                 />
               }
             />
@@ -272,6 +280,14 @@ function DashboardLayout({
           </Routes>
         </div>
       </div>
+
+      {/* Corridor Alert Drawer (Step 7) */}
+      <AlertDrawer
+        isOpen={isAlertDrawerOpen}
+        onClose={() => setIsAlertDrawerOpen(false)}
+        alerts={alerts}
+        onAlertUpdated={refreshAlerts}
+      />
     </div>
   );
 }
@@ -335,6 +351,21 @@ function AppContent() {
   const [connectionStatus, setConnectionStatus] = useState("connected"); // 'connected' | 'lost'
   const [isLiveUpdated, setIsLiveUpdated] = useState(false);
   const [lastRouteUpdate, setLastRouteUpdate] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [isAlertDrawerOpen, setIsAlertDrawerOpen] = useState(false);
+
+  const refreshAlerts = async () => {
+    try {
+      const res = await fetchActiveAlerts();
+      setAlerts(res.alerts || []);
+    } catch (err) {
+      console.debug("Failed to refresh active alerts:", err);
+    }
+  };
+
+  useEffect(() => {
+    refreshAlerts();
+  }, []);
 
   // Mode change handler
   const handleModeChange = async (newMode) => {
@@ -350,6 +381,26 @@ function AppContent() {
       } finally {
         setIsLoading(false);
       }
+    }
+  };
+
+  const handleScenarioStepped = async () => {
+    try {
+      setIsLoading(true);
+      const [statusRes, riskRes, alertRes] = await Promise.all([
+        fetchLiveStatus(),
+        fetchLiveRisk(),
+        fetchActiveAlerts(),
+      ]);
+      setLiveStatus(statusRes);
+      setRiskData(riskRes);
+      setAlerts(alertRes.alerts || []);
+      setIsLiveUpdated(true);
+      setTimeout(() => setIsLiveUpdated(false), 1400);
+    } catch (err) {
+      console.error("Failed to sync scenario state:", err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -433,8 +484,15 @@ function AppContent() {
         if (!isMounted) return;
         fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
         fetchLiveStatus().then((d) => isMounted && setLiveStatus(d)).catch(() => {});
+        refreshAlerts();
         setIsLiveUpdated(true);
         setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+      });
+
+      es.addEventListener("alert", () => {
+        if (!isMounted) return;
+        refreshAlerts();
+        fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
       });
 
       es.addEventListener("route_update", (e) => {
@@ -588,6 +646,11 @@ function AppContent() {
               onRefreshLive={handleRefreshLive}
               isLiveUpdated={isLiveUpdated}
               lastRouteUpdate={lastRouteUpdate}
+              alerts={alerts}
+              isAlertDrawerOpen={isAlertDrawerOpen}
+              setIsAlertDrawerOpen={setIsAlertDrawerOpen}
+              refreshAlerts={refreshAlerts}
+              onScenarioStepped={handleScenarioStepped}
             />
           </ProtectedRoute>
         }

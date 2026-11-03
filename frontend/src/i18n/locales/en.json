@@ -211,5 +211,19 @@
     "passable": "Passable",
     "impassable": "Impassable / Hold",
     "compare_previous": "Compare with Previous Route Calculation"
+  },
+  "alerts": {
+    "title": "Corridor Alerts",
+    "active_alerts": "Active Alerts",
+    "no_alerts": "No active corridor disruption alerts",
+    "in_app_notice": "In-App Delivery Boundary: Delivered exclusively via web application interface.",
+    "acknowledge": "Acknowledge",
+    "clear": "Clear Alert",
+    "acknowledged": "Acknowledged",
+    "active": "Active",
+    "simulated_tag": "SIMULATED",
+    "scenario_title": "Multi-Day Storm Scenario",
+    "advance_phase": "Advance Storm Phase",
+    "reset_baseline": "Reset to Baseline"
   }
 }

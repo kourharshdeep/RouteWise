@@ -11,6 +11,6 @@ Resuming sessions must inspect this file and proceed from the first unfinished s
 | Step 3 | Live risk service and endpoints | COMPLETED | 1d481e9cc6b59067dda9924084e1323b57a47e1a |
 | Step 4 | Hazard events and operational status | COMPLETED | f52833595f906db4e0dbedfd9ce89b5376fdb3b7 |
 | Step 5 | Live updates in the dashboard | COMPLETED | d9e41e54a7a0b322467b7cb86d29c1053df3c103 |
-| Step 6 | Dynamic route recalculation | COMPLETED | in-commit |
-| Step 7 | Alerts and monitoring | PENDING | - |
+| Step 6 | Dynamic route recalculation | COMPLETED | 2e69d8e9ab0f03573043acdde318d9f9706e20ec |
+| Step 7 | Alerts and monitoring | COMPLETED | in-commit |
 | Step 8 | Closing and verification | PENDING | - |

@@ -102,5 +102,26 @@ The following strings were added for dynamic route recalculation, operational jo
 | `routing.impassable` | `Impassable / Hold` | `अवरुद्ध / रुकें` | Segment blocked by hazard |
 | `routing.compare_previous` | `Compare with Previous Route Calculation` | `पिछले मार्ग परिकलन से तुलना करें` | Dynamic route change comparison |
 
+---
+
+## 8. Unreviewed Additions (Step 7 - Alerts and Real-Time Monitoring)
+The following strings were added for the in-app corridor alerts drawer, lifecycle state tracking, acknowledgement controls, and demo multi-day storm scenario player, and are marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| `alerts.title` | `Corridor Alerts` | `गलियारा अलर्ट` | Alert drawer title |
+| `alerts.active_alerts` | `Active Alerts` | `सक्रिय अलर्ट` | Active counter badge |
+| `alerts.no_alerts` | `No active corridor disruption alerts` | `इस समय कोई सक्रिय व्यवधान अलर्ट नहीं है` | Empty state text |
+| `alerts.in_app_notice` | `In-App Delivery Boundary: Delivered exclusively via web application interface.` | `इन-ऐप वितरण सीमा: विशेष रूप से वेब एप्लिकेशन इंटरफ़ेस के माध्यम से वितरित।` | In-app only boundary notice |
+| `alerts.acknowledge` | `Acknowledge` | `स्वीकार करें` | Patrol officer acknowledgement action |
+| `alerts.clear` | `Clear Alert` | `अलर्ट हटाएं` | Manual clear action |
+| `alerts.acknowledged` | `Acknowledged` | `स्वीकृत` | Status badge |
+| `alerts.active` | `Active` | `सक्रिय` | Status badge |
+| `alerts.simulated_tag` | `SIMULATED` | `सिम्युलेटेड` | Simulation badge |
+| `alerts.scenario_title` | `Multi-Day Storm Scenario` | `बहु-दिवसीय तूफान परिदृश्य` | Demo scenario player header |
+| `alerts.advance_phase` | `Advance Storm Phase` | `तूफान चरण आगे बढ़ाएं` | Scenario step button |
+| `alerts.reset_baseline` | `Reset to Baseline` | `आधार रेखा पर रीसेट करें` | Scenario reset button |
+
+
 
 

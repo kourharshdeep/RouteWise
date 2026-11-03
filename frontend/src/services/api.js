@@ -347,3 +347,61 @@ export async function fetchLiveChanges(since) {
 export function getLiveStreamUrl() {
   return `${API_BASE}/api/v1/live/stream`;
 }
+
+// 9. Alerts and Monitoring (Step 7)
+export async function fetchActiveAlerts(limit = 100) {
+  const res = await fetch(`${API_BASE}/api/v1/alerts/active?limit=${limit}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch active alerts (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function fetchAlertHistory(limit = 100) {
+  const res = await fetch(`${API_BASE}/api/v1/alerts/history?limit=${limit}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch alert history (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function acknowledgeAlert(alertId) {
+  const res = await fetch(`${API_BASE}/api/v1/alerts/${encodeURIComponent(alertId)}/acknowledge`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to acknowledge alert (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function clearAlert(alertId) {
+  const res = await fetch(`${API_BASE}/api/v1/alerts/${encodeURIComponent(alertId)}/clear`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to clear alert (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function stepReplayScenario(stepIndex) {
+  const res = await fetch(`${API_BASE}/api/v1/alerts/scenario/step`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ step_index: stepIndex }),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.detail || `Failed to step scenario (HTTP ${res.status})`);
+  }
+  return res.json();
+}

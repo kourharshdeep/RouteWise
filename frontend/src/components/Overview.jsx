@@ -17,6 +17,7 @@ import CorridorStrip from './CorridorStrip';
 import RiskDetailDrawer from './RiskDetailDrawer';
 import OfficialAdvisoriesCard from './OfficialAdvisoriesCard';
 import AlongRouteServicesCard from './AlongRouteServicesCard';
+import ScenarioPlayer from './ScenarioPlayer';
 
 export default function Overview({
   health,
@@ -31,6 +32,7 @@ export default function Overview({
   connectionStatus = 'connected',
   onRefreshLive,
   isLiveUpdated = false,
+  onScenarioStepped,
 }) {
   const isLive = mode === 'live';
   const { t } = useTranslation();
@@ -58,6 +60,11 @@ export default function Overview({
         connectionStatus={connectionStatus}
         onRefresh={onRefreshLive}
       />
+      {/* Demo Replay Multi-Day Storm Scenario Player */}
+      {isLive && (
+        <ScenarioPlayer onScenarioStepped={onScenarioStepped} />
+      )}
+
       {/* Hero Welcome Banner */}
       <div className="overview-hero-card">
         <div className="hero-content">

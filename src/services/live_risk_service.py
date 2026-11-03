@@ -104,10 +104,11 @@ class LiveRiskService:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_computed ON live_risk(computed_at);")
             conn.commit()
 
-    def prune_old_records(self, max_history_days: int = 7) -> int:
+    def prune_old_records(self, max_history_days: int = 7, eval_time: Optional[datetime] = None) -> int:
         """Enforces a bounded 7-day history limit in live_risk table."""
         self.init_db()
-        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=max_history_days)).strftime("%Y-%m-%d")
+        ref_time = eval_time or datetime.now(timezone.utc)
+        cutoff_date = (ref_time - timedelta(days=max_history_days)).strftime("%Y-%m-%d")
         with self._get_connection() as conn:
             cur = conn.execute("DELETE FROM live_risk WHERE as_of < ?", (cutoff_date,))
             deleted = cur.rowcount
@@ -211,7 +212,7 @@ class LiveRiskService:
             conn.commit()
 
         # Enforce bounded 7-day history
-        self.prune_old_records()
+        self.prune_old_records(eval_time=effective_eval_time)
 
         logger.info(
             "Computed and persisted live risk for %d segments (as_of: %s, status: %s)",
@@ -245,23 +246,27 @@ class LiveRiskService:
             out.append(d)
         return out
 
-    def get_latest_live_risk(self) -> Dict[str, Any]:
-        """Retrieves the latest live risk evaluation across all 151 segments."""
+    def get_latest_live_risk(self, as_of: Optional[str] = None) -> Dict[str, Any]:
+        """Retrieves the live risk evaluation across all 151 segments (latest or for a specified date)."""
         self.init_db()
         with self._get_connection() as conn:
-            latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
-            latest_as_of = latest_row[0] if latest_row and latest_row[0] else None
+            if as_of:
+                target_as_of = as_of
+            else:
+                latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
+                target_as_of = latest_row[0] if latest_row and latest_row[0] else None
 
-            if not latest_as_of and not getattr(self, "_is_computing", False):
+            if not target_as_of and not getattr(self, "_is_computing", False):
                 self._is_computing = True
                 try:
-                    self.compute_live_risk()
+                    self.compute_live_risk(as_of=target_as_of)
                 finally:
                     self._is_computing = False
-                latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
-                latest_as_of = latest_row[0] if latest_row and latest_row[0] else None
+                if not as_of:
+                    latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
+                    target_as_of = latest_row[0] if latest_row and latest_row[0] else None
 
-            if not latest_as_of:
+            if not target_as_of:
                 return {
                     "as_of": None,
                     "computed_at": None,
@@ -281,7 +286,7 @@ class LiveRiskService:
                 WHERE as_of = ?
                 ORDER BY segment_id ASC
                 """,
-                (latest_as_of,),
+                (target_as_of,),
             ).fetchall()
 
         from src.services.hazard_event_service import hazard_event_service
@@ -328,7 +333,7 @@ class LiveRiskService:
             })
 
         return {
-            "as_of": latest_as_of,
+            "as_of": target_as_of,
             "computed_at": computed_at,
             "experimental": True,
             "disclaimer": "Live data - Experimental - not validated. Relative advisory index.",

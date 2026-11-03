@@ -273,7 +273,7 @@ class JourneyService:
         if mode == "live":
             from src.services.live_risk_service import live_risk_service
 
-            live_risk = live_risk_service.get_latest_live_risk()
+            live_risk = live_risk_service.get_latest_live_risk(as_of=req.date)
             live_status = live_risk_service.get_live_status()
 
             journey_date_str = req.date or live_risk.get("as_of") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -282,8 +282,7 @@ class JourneyService:
                 risk_lookup[seg["segment_id"]] = seg
 
             is_live_stale = (
-                ((live_status.get("data_age_hours") or 0) > 24)
-                or ((live_status.get("stale_count") or 0) > 0)
+                any(seg.get("is_stale", False) for seg in live_risk.get("segments", []))
                 or (live_risk.get("as_of") is None)
             )
         else:

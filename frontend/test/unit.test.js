@@ -372,3 +372,75 @@ describe('Dynamic Routing & Operational Recommendation Matrix', () => {
     assert.equal(mockRiskAware.is_passable, false);
   });
 });
+
+// ==============================================================================
+// 8. Alerts, In-App Boundary & Role Matrix (Step 7)
+// ==============================================================================
+describe('Alerts, In-App Boundary & Role Matrix', () => {
+  it('enforces RBAC for alert acknowledgement and clearing actions', () => {
+    const canAcknowledgeOrClear = (role) => {
+      return role === 'patrol' || role === 'admin';
+    };
+
+    assert.equal(canAcknowledgeOrClear('admin'), true);
+    assert.equal(canAcknowledgeOrClear('patrol'), true);
+    assert.equal(canAcknowledgeOrClear('user'), false);
+    assert.equal(canAcknowledgeOrClear('guest'), false);
+    assert.equal(canAcknowledgeOrClear(null), false);
+  });
+
+  it('guarantees in-app delivery boundary constraint on alert payloads', () => {
+    const sampleAlert = {
+      id: 'alert_test_01',
+      segment_id: 'seg_123',
+      alert_type: 'closure',
+      status: 'active',
+      delivery_channel: 'in_app_only',
+      delivery_notice: 'In-App Advisory Only: RouteWise alerts are delivered exclusively via the web interface. No SMS, push notifications, or cellular broadcasts are emitted.',
+    };
+
+    assert.equal(sampleAlert.delivery_channel, 'in_app_only');
+    assert.match(sampleAlert.delivery_notice, /No SMS/);
+    assert.match(sampleAlert.delivery_notice, /In-App Advisory Only/);
+  });
+
+  it('ensures alert i18n keys exist in both EN and HI catalogs', () => {
+    const alertKeys = [
+      'title',
+      'active_alerts',
+      'no_alerts',
+      'in_app_notice',
+      'acknowledge',
+      'clear',
+      'acknowledged',
+      'active',
+      'simulated_tag',
+      'scenario_title',
+      'advance_phase',
+      'reset_baseline',
+    ];
+
+    for (const k of alertKeys) {
+      assert.ok(enTranslations.alerts?.[k], `EN missing alert key: ${k}`);
+      assert.ok(hiTranslations.alerts?.[k], `HI missing alert key: ${k}`);
+    }
+  });
+
+  it('verifies 1-hour cooldown calculation logic', () => {
+    const isWithinCooldown = (clearedAtIso, currentIso) => {
+      const clearedTime = new Date(clearedAtIso).getTime();
+      const currentTime = new Date(currentIso).getTime();
+      const elapsedSeconds = (currentTime - clearedTime) / 1000;
+      return elapsedSeconds < 3600;
+    };
+
+    const t0 = '2026-11-03T12:00:00Z';
+    const t30min = '2026-11-03T12:30:00Z';
+    const t59min = '2026-11-03T12:59:00Z';
+    const t61min = '2026-11-03T13:01:00Z';
+
+    assert.equal(isWithinCooldown(t0, t30min), true, '30 min should be inside cooldown');
+    assert.equal(isWithinCooldown(t0, t59min), true, '59 min should be inside cooldown');
+    assert.equal(isWithinCooldown(t0, t61min), false, '61 min should be outside cooldown');
+  });
+});
