@@ -41,3 +41,4 @@ def compute_rolling_precipitation(
     )
 
     return res
+

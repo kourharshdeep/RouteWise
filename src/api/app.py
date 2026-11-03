@@ -1,12 +1,24 @@
 """FastAPI Application Factory for RouteWise."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.config import settings
 from src.api.routes import auth, chat, corridor, disruptions, health, journey, reports, risk
+from src.services.weather.scheduler import weather_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manages application startup and shutdown events."""
+    # Startup: Start live/replay weather scheduler if enabled
+    weather_scheduler.start()
+    yield
+    # Shutdown: Stop scheduler cleanly
+    await weather_scheduler.stop()
 
 
 def create_app() -> FastAPI:
@@ -20,6 +32,7 @@ def create_app() -> FastAPI:
         ),
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # 1. CORS Middleware configuration

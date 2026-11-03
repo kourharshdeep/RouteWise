@@ -216,3 +216,4 @@ class WeatherStorage:
 
 # Module-level default storage instance pointing to settings.live_db_path
 weather_storage = WeatherStorage()
+

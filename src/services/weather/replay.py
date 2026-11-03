@@ -86,3 +86,4 @@ class ReplayProvider(WeatherProvider):
 
         df = pd.DataFrame(matching_rows, columns=columns)
         return df
+

@@ -86,3 +86,4 @@ class WeatherProvider(ABC):
                 - quality_flag: str ('OK', 'ESTIMATED', etc.)
         """
         ...
+

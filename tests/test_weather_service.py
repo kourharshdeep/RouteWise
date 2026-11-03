@@ -134,3 +134,4 @@ def test_compute_rolling_precipitation():
     # Day 2..8 sum = 20+30+0+0+5+10+15 = 80
     assert res["precip_7d_mm"].iloc[6] == 75.0
     assert res["precip_7d_mm"].iloc[7] == 80.0
+
