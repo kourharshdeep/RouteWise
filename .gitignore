@@ -34,6 +34,7 @@ coverage/
 *.sqlite
 *.sqlite3
 *.db-journal
+data/runtime/
 
 # ---------- User uploads (patrol report photos) ----------
 uploads/

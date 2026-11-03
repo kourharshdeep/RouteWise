@@ -96,3 +96,24 @@
 ## 7. Theming & Hardcoded Colors
 - **Design System:** Centralized CSS custom properties in `frontend/src/theme.css` and `frontend/src/App.css` reacting to `data-theme="dark"` and `data-theme="light"`.
 - **Hardcoded Colors:** 11 hardcoded hex color values identified in `frontend/src/components/CorridorMap.jsx` (0 in other components). These will be refactored into semantic tokens during Phase 7.
+
+---
+
+## 8. Real-Time Intelligence Architecture (Live & Replay Modes)
+
+### Mode Configuration (`ROUTEWISE_LIVE_MODE`)
+- `off` (Default): All real-time background fetchers and live schedulers remain inactive. The application operates strictly in historical mode with 100% existing API parity.
+- `replay`: Weather observations are replayed from historical ERA5-Land reanalysis (`data/weather_daily_by_segment.csv`) as if live, isolated into the runtime database `data/runtime/routewise_live.db`.
+- `live`: Live weather observations are fetched from the external provider (Open-Meteo), converted to ERA5-Land units, rolled into 7-day feature windows, and passed to the existing ST-GNN inference engine.
+
+### Runtime Isolation
+- All live observations, hazard events, live risk scores, and alerts are stored in `data/runtime/routewise_live.db` (git-ignored).
+- Historical assets (`data/routewise_local.db`, `data/*.csv`, `cache/`) are strictly read-only protected assets and never modified by live operations.
+
+### Honest Framing & Distribution Shift Guarantees
+- **Distribution Shift:** The PyTorch ST-GNN model was trained on ERA5-Land atmospheric reanalysis. Live numerical weather forecasts/observations represent a distribution shift. All live predictions are explicitly badged **"Experimental - not validated"** across API payloads and user interfaces.
+- **Relative Risk Index:** Prediction scores represent an advisory relative-risk index (0.0 to 1.0) and must never be presented as physical failure probabilities.
+- **Fail-Safe Integrity:** Missing or stale data (< 7 days of weather, or observation older than 24 hours) is evaluated as `UNKNOWN` or `STALE_DATA`, never as `Low` risk.
+- **Simulated Hazards:** Any operator-simulated incident is explicitly badged `is_simulated=true` / `SIMULATED` and will never enter historical training datasets.
+- **Single Corridor Reality:** The NH-44 Ramban–Banihal section is essentially a single-corridor mountain highway without alternate bypasses. If a segment is blocked, routing outputs must advise "HOLD" or "DELAY" rather than fabricating non-existent detours.
+
