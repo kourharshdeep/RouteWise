@@ -104,3 +104,4 @@ if __name__ == "__main__":
     if not (ok_manifest and ok_git):
         sys.exit(1)
     print("Protected assets verification: PASSED")
+

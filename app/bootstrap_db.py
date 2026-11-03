@@ -199,15 +199,30 @@ def bootstrap_database(
 
     finally:
         conn.close()
+    bootstrap_live_database()
+
+
+def bootstrap_live_database(live_db_path: Path | None = None) -> None:
+    """Initializes tables for live weather observations in the isolated runtime DB."""
+    from src.services.weather.storage import WeatherStorage
+
+    target_live_db = Path(live_db_path or settings.live_db_path)
+    logger.info("Bootstrapping RouteWise live runtime database at: %s", target_live_db)
+    storage = WeatherStorage(db_path=target_live_db)
+    storage.init_db()
+    logger.info("Live runtime database initialized successfully at %s", target_live_db)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bootstrap RouteWise SQLite database and weather tables.")
     parser.add_argument("--db-path", type=Path, default=None, help="Custom SQLite database output path.")
     parser.add_argument("--weather-path", type=Path, default=None, help="Custom weather daily CSV input path.")
+    parser.add_argument("--live-db-path", type=Path, default=None, help="Custom live runtime SQLite database path.")
     args = parser.parse_args()
 
     bootstrap_database(db_path=args.db_path, weather_csv_path=args.weather_path)
+    if args.live_db_path:
+        bootstrap_live_database(live_db_path=args.live_db_path)
 
 
 if __name__ == "__main__":
