@@ -117,3 +117,28 @@
 - **Simulated Hazards:** Any operator-simulated incident is explicitly badged `is_simulated=true` / `SIMULATED` and will never enter historical training datasets.
 - **Single Corridor Reality:** The NH-44 Ramban–Banihal section is essentially a single-corridor mountain highway without alternate bypasses. If a segment is blocked, routing outputs must advise "HOLD" or "DELAY" rather than fabricating non-existent detours.
 
+---
+
+## 9. Operational Status Rule Table & Hazard Event Overlay (Task 2 / Step 4)
+
+### Architectural Principle: Overlay Separation
+Hazard events (field reports, operator simulations, official TCU advisories) act as an **operational overlay**. They **never modify model weights, model input tensors, or calculated ST-GNN risk scores**. The API returns both `model_risk` and `active_events[]`, synthesizing them into a derived `operational_status`.
+
+### Deterministic Operational Status Rule Table
+
+| Priority | Evaluated Condition | Resulting `operational_status` | Operational Meaning |
+|:---:|---|:---:|---|
+| **1** | Any active event with `severity == 'critical'` OR `hazard_type in ('landslide', 'flooding')` | **`CLOSED`** | Road physically blocked or impassable. Traffic must hold. |
+| **2** | Any active event with `hazard_type in ('single_lane', 'single-lane')` OR `severity == 'high'` OR (`hazard_type in ('shooting_stones', 'snow_ice', 'road_damage')` AND `severity == 'medium'`) | **`RESTRICTED`** | Reduced capacity, convoys, or severe slowdown. Proceed with caution. |
+| **3** | Model input is missing (< 7 days) or stale (> 24h) AND no critical/blocking physical event | **`UNKNOWN`** | Telemetry deficit: advisory status cannot be safely determined. Never defaults to Low/Open. |
+| **4** | Active event with `severity in ('low', 'medium')` OR `model_risk.risk_tier in ('Medium', 'High')` | **`CAUTION`** | Elevated hazard potential or minor localized disturbance. |
+| **5** | `model_risk.risk_tier == 'Low'` AND zero active events on the segment | **`OPEN`** | Normal operational flow under standard advisory guidelines. |
+
+### Event Lifecycle & Governance Rules
+1. **Unverified Field Reports:** Public reports in status `submitted` **NEVER** generate public hazard events or alter operational status.
+2. **Verification Promotion:** When a patrol officer or administrator marks a report as `verified` or `assigned`, an active event is created or refreshed with a 24-hour default expiration.
+3. **Closure & Rejection:** Marking a report as `resolved` or `rejected` immediately transitions associated events to status `closed`.
+4. **Auto-Expiry Audit Trail:** Active events exceeding `expires_at` are transitioned to `expired` by background workers, appending an immutable record to `hazard_event_history`.
+5. **Simulated Hazards Containment:** Operator simulations (`POST /api/v1/events/simulate`) are restricted exclusively to administrators (HTTP 403 otherwise). Simulated records have `is_simulated=1`, badge `SIMULATED`, reside solely in `data/runtime/routewise_live.db`, and are purged with `POST /api/v1/events/simulate/clear`.
+
+

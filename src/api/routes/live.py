@@ -41,3 +41,4 @@ def get_live_changes(
 ) -> LiveRiskChangesResponse:
     """Returns risk predictions that were computed or modified after the given timestamp."""
     return LiveRiskChangesResponse(**live_risk_service.get_risk_changes(since=since))
+

@@ -454,6 +454,18 @@ class ReportService:
             conn.commit()
 
             updated = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+            try:
+                from src.services.hazard_event_service import hazard_event_service
+                hazard_event_service.on_report_status_change(
+                    report_id=report_id,
+                    status_value=new_status,
+                    category=updated["category"],
+                    segment_id=updated["nearest_segment_id"],
+                    actor_id=actor.id,
+                    is_simulated=bool(updated["is_simulated"]),
+                )
+            except Exception as ev_err:
+                logger.error("Failed to sync hazard event on report status update: %s", ev_err)
             return self._row_to_report(conn, updated)
 
     def assign_report(
@@ -513,6 +525,18 @@ class ReportService:
             conn.commit()
 
             updated = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+            try:
+                from src.services.hazard_event_service import hazard_event_service
+                hazard_event_service.on_report_status_change(
+                    report_id=report_id,
+                    status_value=new_status,
+                    category=updated["category"],
+                    segment_id=updated["nearest_segment_id"],
+                    actor_id=actor.id,
+                    is_simulated=bool(updated["is_simulated"]),
+                )
+            except Exception as ev_err:
+                logger.error("Failed to sync hazard event on report status update: %s", ev_err)
             return self._row_to_report(conn, updated)
 
     def get_summary_stats(self) -> ReportSummaryStats:

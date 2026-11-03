@@ -264,16 +264,36 @@ class LiveRiskService:
                 (latest_as_of,),
             ).fetchall()
 
+        from src.services.hazard_event_service import hazard_event_service
+
+        events_map = hazard_event_service.get_active_events_by_segment_map()
         segments = []
         summary = {"Low": 0, "Medium": 0, "High": 0, "UNKNOWN": 0}
+        op_summary = {"OPEN": 0, "CAUTION": 0, "RESTRICTED": 0, "CLOSED": 0, "UNKNOWN": 0}
         computed_at = None
 
         for r in rows:
             tier = r["tier"]
             summary[tier] = summary.get(tier, 0) + 1
             computed_at = r["computed_at"]
+            sid = r["segment_id"]
+            seg_events = events_map.get(sid, [])
+            op_status = hazard_event_service.derive_operational_status(
+                model_risk_tier=tier,
+                active_events=seg_events,
+                model_status=r["status"],
+            )
+            op_summary[op_status] = op_summary.get(op_status, 0) + 1
+
+            model_risk = {
+                "risk_score": r["score"],
+                "risk_tier": tier,
+                "status": r["status"],
+                "is_stale": bool(r["is_stale"]),
+            }
+
             segments.append({
-                "segment_id": r["segment_id"],
+                "segment_id": sid,
                 "risk_score": r["score"],
                 "risk_tier": tier,
                 "status": r["status"],
@@ -282,6 +302,9 @@ class LiveRiskService:
                 "checkpoint_sha256": r["checkpoint_sha256"],
                 "weather_window_end": r["weather_window_end"],
                 "computed_at": r["computed_at"],
+                "operational_status": op_status,
+                "active_events": seg_events,
+                "model_risk": model_risk,
             })
 
         return {
@@ -292,6 +315,7 @@ class LiveRiskService:
             "model_version": self._get_engine().model_version,
             "checkpoint_sha256": self._checkpoint_sha256,
             "summary": summary,
+            "operational_summary": op_summary,
             "segments": segments,
         }
 

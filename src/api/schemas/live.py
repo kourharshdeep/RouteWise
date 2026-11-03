@@ -4,6 +4,8 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+from src.api.schemas.events import HazardEventItem
+
 
 class LiveStatusResponse(BaseModel):
     mode: str = Field(..., description="Operational live mode: 'off' | 'replay' | 'live'")
@@ -30,6 +32,10 @@ class LiveRiskSegmentItem(BaseModel):
     checkpoint_sha256: str
     weather_window_end: str
     computed_at: str
+    # Operational overlay attributes (Step 4)
+    operational_status: str = Field("UNKNOWN", description="Derived operational status: OPEN | CAUTION | RESTRICTED | CLOSED | UNKNOWN")
+    active_events: List[HazardEventItem] = Field(default_factory=list, description="Active hazard event overlays")
+    model_risk: Dict[str, Any] = Field(default_factory=dict, description="Raw ST-GNN inference risk dictionary")
 
 
 class LiveRiskResponse(BaseModel):
@@ -40,6 +46,7 @@ class LiveRiskResponse(BaseModel):
     model_version: str
     checkpoint_sha256: str
     summary: Dict[str, int] = Field(..., description="Tier counts: Low, Medium, High, UNKNOWN")
+    operational_summary: Optional[Dict[str, int]] = Field(None, description="Operational status breakdown: OPEN, CAUTION, RESTRICTED, CLOSED, UNKNOWN")
     segments: List[LiveRiskSegmentItem] = Field(..., description="Predictions for all 151 segments")
 
 
