@@ -89,6 +89,14 @@ class WeatherScheduler:
             # Upsert into isolated runtime storage
             upserted = await loop.run_in_executor(None, self.storage.upsert_observations, df)
 
+            # Recompute live risk after successful weather fetch
+            try:
+                from src.services.live_risk_service import live_risk_service
+                await loop.run_in_executor(None, live_risk_service.compute_live_risk)
+                logger.info("Live risk recomputed successfully following weather fetch.")
+            except Exception as e:
+                logger.error("Error recomputing live risk post-fetch: %s", e)
+
             self._last_fetch_time = datetime.now(timezone.utc).isoformat()
             self._last_status = "SUCCESS"
             self._last_error = None
@@ -173,3 +181,4 @@ class WeatherScheduler:
 
 
 weather_scheduler = WeatherScheduler()
+

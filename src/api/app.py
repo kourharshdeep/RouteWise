@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.config import settings
-from src.api.routes import auth, chat, corridor, disruptions, health, journey, reports, risk
+from src.api.routes import auth, chat, corridor, disruptions, health, journey, live, reports, risk
 from src.services.weather.scheduler import weather_scheduler
 
 
@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=settings.api_prefix)
     app.include_router(reports.router, prefix=settings.api_prefix)
     app.include_router(risk.router, prefix=settings.api_prefix)
+    app.include_router(live.router, prefix=settings.api_prefix)
     app.include_router(corridor.router, prefix=settings.api_prefix)
     app.include_router(journey.router, prefix=settings.api_prefix)
     app.include_router(disruptions.router, prefix=settings.api_prefix)

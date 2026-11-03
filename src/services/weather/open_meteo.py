@@ -241,3 +241,4 @@ class OpenMeteoProvider(WeatherProvider):
         )
 
         return final_df
+

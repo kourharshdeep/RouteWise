@@ -56,3 +56,4 @@ def build_corridor_grid_clusters(grid_resolution: float = 0.1) -> List[GridClust
         )
 
     return clusters
+
