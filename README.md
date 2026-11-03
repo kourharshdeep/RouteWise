@@ -61,6 +61,12 @@ RouteWise estimates landslide, snow and shooting-stone disruption risk for each 
 - English and Hindi interface text (`en.json`, `hi.json`; review notes in `docs/TRANSLATION_REVIEW.md`).
 - Redesigned light theme with WCAG AA compliant contrast tokens.
 - Corridor journey planner with chainage-ordered physical routing and hazard advisories.
+- Real-Time Intelligence & Demonstration Replay (`ROUTEWISE_LIVE_MODE=off|replay|live`): Isolated runtime database (`data/runtime/routewise_live.db`), Open-Meteo clustering ingestion, unit conversion, 7-day rolling window inference wrapping ST-GNN without modifying model weights.
+- Deterministic Operational Status Overlay: Combines model risk with verified ground reports, TCU advisories, and operator simulations into `OPEN`, `CAUTION`, `RESTRICTED`, `CLOSED`, or `UNKNOWN`.
+- Dynamic Multi-Objective Corridor Routing: Real distance vs risk-aware trade-offs, operational recommendations (`HOLD`, `DELAY`, `PROCEED_WITH_CAUTION`, `PROCEED`, `NO_DATA`), single-corridor honesty constraint (`has_alternative=False`).
+- Active Corridor Alerts & Monitoring: In-app delivery boundary, 1-hour de-duplication cooldown, patrol acknowledgement, auto-clearance.
+- Real-time Server-Sent Events (SSE): `/api/v1/live/stream` with heartbeats and 60-second frontend polling fallback.
+- Accelerated July 2023 Monsoon Storm Scenario Progression for live evaluator demonstrations.
 
 **Not yet implemented**
 
@@ -247,6 +253,14 @@ The interactive OpenAPI documentation is generated live by FastAPI:
 | Review, verify, assign, resolve reports         | `GET /api/v1/reports`, `PATCH .../status`, `.../assign` | patrol        | Verified |
 | Corridor geometry and input features            | `GET /api/v1/corridor/segments`, `.../features`         | none          | Verified |
 | Corridor journey planner and advisories         | `POST /api/v1/journey/plan`, `GET .../advisories`       | none          | Verified |
+| Live status and telemetry metadata              | `GET /api/v1/live/status`                               | none          | Verified |
+| Live segment risk & operational status          | `GET /api/v1/live/risk`, `GET /api/v1/live/changes`     | none          | Verified |
+| Real-time Server-Sent Events stream             | `GET /api/v1/live/stream`                               | none          | Verified |
+| Active public hazard events                     | `GET /api/v1/events/active`                             | none          | Verified |
+| Simulate and clear hazard events                | `POST /api/v1/events/simulate`, `.../clear`             | admin         | Verified |
+| Active and historical corridor alerts           | `GET /api/v1/alerts/active`, `.../history`              | none          | Verified |
+| Acknowledge and clear corridor alerts           | `POST /api/v1/alerts/{id}/acknowledge`, `.../clear`     | patrol, admin | Verified |
+| Step demonstration monsoon scenario             | `POST /api/v1/alerts/scenario/step`                     | admin         | Verified |
 
 **Model identity (from the model card).** Version `1.0.0-w7`, checkpoint `stgnn_best.pt`, SHA-256 `68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F963D335054006E`.
 
@@ -385,6 +399,7 @@ cp .env.example .env
 
 The configuration template (`.env.example`) defines the following environment variable names:
 
+- **Real-Time Intelligence Switch:** `ROUTEWISE_LIVE_MODE` (`off` [default], `replay`, or `live`), `LIVE_WEATHER_INTERVAL_MINUTES` (default: 60), `ROUTEWISE_LIVE_DB_PATH` (default: `data/runtime/routewise_live.db`)
 - **Security & Authentication:** `ROUTEWISE_SECRET_KEY`, `ROUTEWISE_TOKEN_EXPIRE_HOURS`, `ROUTEWISE_GUEST_EXPIRE_HOURS`, `ROUTEWISE_DEMO_MODE`, `DEMO_PATROL_PASSWORD`, `DEMO_USER_PASSWORD`
 - **Server Hosting & CORS:** `ROUTEWISE_HOST`, `ROUTEWISE_PORT`, `ROUTEWISE_DEBUG`, `ROUTEWISE_CORS_ORIGINS`
 - **Uploads & File Limits:** `ROUTEWISE_MAX_UPLOAD_BYTES`, `ROUTEWISE_UPLOADS_DIR`
@@ -439,6 +454,24 @@ Do not regenerate or overwrite these casually. Back them up first and write new 
 | `cache/precomputed_risk_cache.json`                 | Stores precomputed inference for 1,821 historical dates. Rebuild only after the checkpoint or data change                                                                     |
 | `routewise_local.db`                                | Recreated via `python -m app.bootstrap_db`                                                                                                                                    |
 | `stgnn_metrics.json`, `week6_baseline_metrics.json` | These are the evidence for the published results                                                                                                                               |
+
+## Real-Time Intelligence & Demonstration Replay
+
+RouteWise includes a real-time intelligence layer governed by the `ROUTEWISE_LIVE_MODE` switch:
+
+- **`ROUTEWISE_LIVE_MODE=off` (Default):** All real-time background schedulers and fetchers remain completely disabled. The application behaves strictly in historical mode with 100% existing API and database parity.
+- **`ROUTEWISE_LIVE_MODE=replay`:** Replays historical ERA5-Land reanalysis observations day-by-day from `data/weather_daily_by_segment.csv` as if live, isolated into the runtime database `data/runtime/routewise_live.db`. Enables testing the full end-to-end live pipeline, alerts, and dynamic routing with zero network dependencies.
+- **`ROUTEWISE_LIVE_MODE=live`:** Periodically fetches live numerical weather from Open-Meteo (free tier, no API key required). The 151 segments spanning the 36 km corridor are clustered into 22 grid centroids (~9 km resolution); weather is fetched once per cluster and fanned out. Observations are converted to ERA5-Land equivalent units (snowfall cm to mm water equivalent using a 10:1 density assumption), rolled into 7-day feature windows, and evaluated by the existing PyTorch ST-GNN inference engine.
+
+### Honest Framing & Safety Principles
+
+- **Distribution Shift Warning:** The underlying ST-GNN model was trained exclusively on Copernicus ERA5-Land reanalysis. Numerical weather forecasts and live observations from another provider constitute an unvalidated distribution shift. All live predictions and UI indicators are explicitly labelled **"Live data - Experimental - not validated"**.
+- **Advisory Relative Risk Index:** Model scores are an advisory relative-risk index (0.0 to 1.0), not calibrated physical failure probabilities.
+- **Fail-Safe Integrity:** Missing or stale data (< 7 days of observations, or observations older than 24 hours) is evaluated as `UNKNOWN` or `STALE_DATA` (`is_stale=true`), never defaulting to `Low` risk.
+- **Single-Corridor Honesty:** The NH-44 Ramban–Banihal section is essentially a single physical highway corridor through the Chenab gorge. If an obstruction or closure occurs, the journey planner issues a **`HOLD`** or **`DELAY`** advisory at the prior staging depot. RouteWise strictly enforces `has_alternative=False` and never fabricates phantom detour routes.
+- **In-App Delivery Boundary:** RouteWise alerts are delivered exclusively within the web application interface. No external SMS gateways, cellular broadcasts, or mobile push notification daemons are claimed or used.
+
+---
 
 ## Running the backend and frontend
 

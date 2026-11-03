@@ -141,4 +141,96 @@ Hazard events (field reports, operator simulations, official TCU advisories) act
 4. **Auto-Expiry Audit Trail:** Active events exceeding `expires_at` are transitioned to `expired` by background workers, appending an immutable record to `hazard_event_history`.
 5. **Simulated Hazards Containment:** Operator simulations (`POST /api/v1/events/simulate`) are restricted exclusively to administrators (HTTP 403 otherwise). Simulated records have `is_simulated=1`, badge `SIMULATED`, reside solely in `data/runtime/routewise_live.db`, and are purged with `POST /api/v1/events/simulate/clear`.
 
+---
+
+## 10. Real-Time Data Pipeline & Streaming Architecture (Steps 1–7)
+
+### End-to-End Data Flow
+
+```text
+[Weather Source]
+  ├── ReplayProvider (data/weather_daily_by_segment.csv)
+  └── OpenMeteoProvider (Open-Meteo REST API, 22 clusters)
+        │
+        ▼
+[Runtime Storage: data/runtime/routewise_live.db]
+  └── weather_observation (7 dynamic features, quality flags, idempotent upsert)
+        │
+        ▼
+[LiveRiskService]
+  ├── 7-day rolling feature window construction
+  ├── ST-GNN wrapping (stgnn_best.pt, SHA-256 verified)
+  ├── Fail-safe evaluation (<7d -> UNKNOWN, >24h -> STALE_DATA)
+  └── live_risk table (score, tier, model_version, computed_at)
+        │
+        ▼
+[Operational Synthesis & Monitoring]
+  ├── HazardEventService: hazard_event table (field reports, simulated, TCU)
+  │     └── derived operational_status (CLOSED, RESTRICTED, UNKNOWN, CAUTION, OPEN)
+  ├── AlertService: alert table (de-duplication, 1-hr cooldown, auto-clearance)
+  └── JourneyService: MultiObjectiveRouter (baseline vs risk-aware, HOLD/DELAY)
+        │
+        ▼
+[Real-Time Dispatch: LiveBroadcaster]
+  └── SSE Endpoint: GET /api/v1/live/stream
+        ├── Heartbeat (every 20s)
+        ├── risk_update
+        ├── event_update
+        ├── alert
+        ├── route_update
+        └── status
+              │
+              ▼
+[Frontend: React 18 Dashboard]
+  ├── Live Context (EventSource connection, 60s polling fallback)
+  ├── LiveBanner ("Experimental - not validated", telemetry age, amber stale)
+  ├── CorridorStrip & CorridorMap (in-place animated updates, non-color cues)
+  ├── JourneyPlanner (side-by-side comparison, HOLD notification)
+  └── AlertDrawer & ScenarioPlayer (bilingual alerts, patrol ack/clear)
+```
+
+### Runtime Database Schemas (`data/runtime/routewise_live.db`)
+
+1. **`weather_observation`**:
+   - `segment_id TEXT`, `obs_date TEXT`, `precip_mm REAL`, `snowfall_mm_we REAL`, `temp_mean_c REAL`, `temp_min_c REAL`, `snow_depth_m REAL`, `precip_3d_mm REAL`, `precip_7d_mm REAL`, `source TEXT`, `fetched_at TEXT`, `quality_flag TEXT`
+   - Primary Key: `(segment_id, obs_date, source)`
+   - Indexes: `idx_weather_obs_date (obs_date)`, `idx_weather_segment (segment_id)`
+
+2. **`live_risk`**:
+   - `id INTEGER PRIMARY KEY AUTOINCREMENT`, `segment_id TEXT`, `as_of TEXT`, `score REAL`, `tier TEXT`, `status TEXT`, `model_version TEXT`, `checkpoint_sha256 TEXT`, `weather_window_end TEXT`, `computed_at TEXT`
+   - Primary Key: `(segment_id, as_of)`
+   - Indexes: `idx_live_risk_segment_asof (segment_id, as_of)`
+
+3. **`hazard_event`**:
+   - `id TEXT PRIMARY KEY`, `segment_id TEXT`, `hazard_type TEXT`, `severity TEXT`, `status TEXT`, `origin TEXT`, `is_simulated INTEGER`, `source_report_id TEXT`, `starts_at TEXT`, `expires_at TEXT`, `created_by TEXT`, `created_at TEXT`, `closed_at TEXT`
+   - Indexes: `idx_hazard_active (status, segment_id)`
+
+4. **`hazard_event_history`**:
+   - `id INTEGER PRIMARY KEY AUTOINCREMENT`, `event_id TEXT`, `action TEXT`, `actor_id TEXT`, `actor_role TEXT`, `note TEXT`, `timestamp TEXT`
+
+5. **`alert`**:
+   - `id TEXT PRIMARY KEY`, `segment_id TEXT`, `alert_type TEXT`, `severity TEXT`, `title_en TEXT`, `title_hi TEXT`, `message_en TEXT`, `message_hi TEXT`, `status TEXT`, `created_at TEXT`, `acknowledged_at TEXT`, `acknowledged_by TEXT`, `cleared_at TEXT`, `cleared_by TEXT`, `cooldown_until TEXT`
+   - Indexes: `idx_alert_active (status, segment_id, alert_type)`
+
+### Spatial Clustering & Open-Meteo Integration
+- **Grid Resolution:** ERA5-Land reanalysis native resolution is ~9 km (~0.1°). The 151 segments spanning the 36 km Ramban–Banihal corridor are spatially clustered into 22 grid centroids using Euclidean coordinate nearest-neighbor search (`src/services/weather/clustering.py`).
+- **Fan-Out Architecture:** During scheduled weather fetches (`LiveWeatherScheduler`), weather data is fetched once per cluster centroid from the Open-Meteo Archive/Forecast API and mapped across all member segments.
+- **Rate-Limiting & Resilience:** Weather requests implement exponential backoff retry loops (initial 1.0s delay, factor 2.0, max 3 retries). If external API rate limits or network failures occur, the service logs the failure gracefully and marks telemetry as `STALE_DATA` without interrupting backend services.
+
+### Multi-Objective Dynamic Routing & Corridor Topology
+- **Graph Alignment:** Physical road graph loaded from `nh44_corridor_graph.graphml` (151 segments, ~36.2 km).
+- **Physical Reality:** NH-44 through the Chenab gorge is topologically a single road. The router enforces `has_alternative=False` and will never invent phantom detours.
+- **Operational Recommendation Matrix:**
+  - `CLOSED` segment encountered on the path -> **`HOLD`** (halt travel at previous staging depot; reason explicitly states road closure).
+  - Missing/stale telemetry -> **`NO_DATA`** (telemetry deficit; cautious operation).
+  - Risk-aware score > baseline threshold -> **`DELAY`** or **`PROCEED_WITH_CAUTION`**.
+  - All segments clear and Low risk -> **`PROCEED`**.
+- **Dynamic SSE Recalculation:** Active journey plans are dynamically re-evaluated whenever live risk scores or hazard events are modified, pushing a `route_update` SSE event to connected dashboard clients.
+
+### Alert Monitoring & Boundary Invariants
+- **De-duplication & Cooldown:** Active alert generation enforces a 1-hour cooldown window per `(segment_id, alert_type)` to eliminate notification fatigue.
+- **Automated Lifecycle:** Alerts auto-clear when segment risk drops below 0.60 or when physical hazard obstructions are marked resolved/expired.
+- **In-App Delivery Boundary:** All RouteWise alerts are delivered exclusively within the web application interface. No external SMS gateways, cellular broadcasts, or mobile push notification daemons are integrated or claimed.
+
+
 
