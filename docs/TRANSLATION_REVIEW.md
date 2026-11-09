@@ -122,6 +122,15 @@ The following strings were added for the in-app corridor alerts drawer, lifecycl
 | `alerts.advance_phase` | `Advance Storm Phase` | `तूफान चरण आगे बढ़ाएं` | Scenario step button |
 | `alerts.reset_baseline` | `Reset to Baseline` | `आधार रेखा पर रीसेट करें` | Scenario reset button |
 
+---
+
+## 9. Unreviewed Additions (Task 2d - Stale Alert Metadata)
+The following string was added for model-derived alerts when live telemetry exceeds staleness thresholds, and is explicitly marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| `alerts.lastKnownDataStale` | `Last known, data stale` | `अंतिम ज्ञात स्थिति, डेटा पुराना है` | Stale risk context indicator for model-derived alerts (Unreviewed) |
+
 
 
 

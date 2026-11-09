@@ -310,6 +310,7 @@ def test_genuine_zero_precipitation_not_flagged(tmp_path: Path):
 
 def test_missing_weather_in_live_risk_evaluates_unknown(tmp_path: Path):
     """Segments with missing weather evaluate to MISSING_DATA, UNKNOWN tier, None score without contaminating others."""
+    from src.api.config import settings
     from src.services.live_risk_service import LiveRiskService
     from src.services.weather.replay import ReplayProvider
 
@@ -320,7 +321,6 @@ def test_missing_weather_in_live_risk_evaluates_unknown(tmp_path: Path):
     # Seed 7 days of complete valid weather from replay
     replay = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
     full_7d = replay.fetch(start_date="2024-07-09", end_date="2024-07-15")
-    # Set source to open-meteo so LiveRiskService picks it up in live mode
     full_7d["source"] = "open-meteo"
     storage.upsert_observations(full_7d)
 
@@ -348,7 +348,7 @@ def test_missing_weather_in_live_risk_evaluates_unknown(tmp_path: Path):
 
     service = LiveRiskService(storage=storage)
     eval_time = pd.to_datetime("2024-07-15 12:00:00+00:00").to_pydatetime()
-    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time)
+    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time, source="open-meteo")
 
     assert len(predictions) == 151
     pred_map = {p["segment_id"]: p for p in predictions}
@@ -434,7 +434,7 @@ def test_missing_cluster_flags_cluster_and_neighbors_as_unknown(tmp_path: Path):
 
     service = LiveRiskService(storage=storage)
     eval_time = pd.to_datetime("2024-07-15 12:00:00+00:00").to_pydatetime()
-    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time)
+    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time, source="open-meteo")
 
     assert len(predictions) == 151
     pred_map = {p["segment_id"]: p for p in predictions}
@@ -487,7 +487,7 @@ def test_missing_above_threshold_flags_all_segments_unknown(tmp_path: Path):
 
     service = LiveRiskService(storage=storage)
     eval_time = pd.to_datetime("2024-07-15 12:00:00+00:00").to_pydatetime()
-    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time)
+    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time, source="open-meteo")
 
     assert len(predictions) == 151
     # Above 25% threshold: ALL 151 segments must be MISSING_DATA and UNKNOWN tier

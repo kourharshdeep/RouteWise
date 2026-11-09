@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Bell,
   X,
@@ -21,6 +22,7 @@ export default function AlertDrawer({
   onAlertUpdated,
 }) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [processingId, setProcessingId] = useState(null);
   const [actionError, setActionError] = useState(null);
 
@@ -133,6 +135,15 @@ export default function AlertDrawer({
                       <strong style={{ fontSize: 13 }}>{item.title_en}</strong>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {item.is_stale_context && (
+                        <span
+                          className="badge badge-stale-context"
+                          data-testid="badge-stale-context"
+                          style={{ fontSize: 10, borderColor: '#eab308', color: '#eab308' }}
+                        >
+                          {t('alerts.lastKnownDataStale')}
+                        </span>
+                      )}
                       {item.is_simulated && (
                         <span className="badge badge-pill" style={{ fontSize: 10, borderColor: '#f97316', color: '#f97316' }}>
                           SIMULATED

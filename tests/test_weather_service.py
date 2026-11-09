@@ -386,3 +386,60 @@ def test_weather_observation_migration_on_copy_of_live_db(tmp_path: Path):
 
 
 
+
+
+def test_socket_guard_blocks_external_connect():
+    """Confirms autouse socket guard in conftest raises RuntimeError on external socket.connect()."""
+    import socket
+    s = socket.socket()
+    try:
+        with pytest.raises(RuntimeError, match="Real outbound socket connection to 'api.open-meteo.com' is strictly prohibited"):
+            s.connect(("api.open-meteo.com", 443))
+    finally:
+        s.close()
+
+
+def test_socket_guard_blocks_external_connect_ex():
+    """Confirms autouse socket guard in conftest raises RuntimeError on external socket.connect_ex()."""
+    import socket
+    s = socket.socket()
+    try:
+        with pytest.raises(RuntimeError, match="Real outbound socket connect_ex to 'api.open-meteo.com' is strictly prohibited"):
+            s.connect_ex(("api.open-meteo.com", 443))
+    finally:
+        s.close()
+
+
+def test_socket_guard_blocks_external_getaddrinfo():
+    """Confirms autouse socket guard in conftest raises RuntimeError on external DNS resolution via getaddrinfo()."""
+    import socket
+    with pytest.raises(RuntimeError, match="Real DNS lookup for 'api.open-meteo.com' is strictly prohibited"):
+        socket.getaddrinfo("api.open-meteo.com", 443)
+
+
+def test_socket_guard_allows_loopback():
+    """Confirms socket guard allows connections to 127.0.0.1 for local asyncio/IPC pipes."""
+    import socket
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client_sock.connect(("127.0.0.1", port))
+        conn, _ = server.accept()
+        conn.close()
+    finally:
+        client_sock.close()
+        server.close()
+
+
+def test_socket_guard_fastapi_testclient_compatibility():
+    """Confirms in-process FastAPI TestClient works seamlessly under the socket guard."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    client = TestClient(app)
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] in ("ok", "degraded")

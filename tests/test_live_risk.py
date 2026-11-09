@@ -26,8 +26,9 @@ client = TestClient(app)
 
 
 @pytest.fixture
-def isolated_live_service(tmp_path: Path) -> LiveRiskService:
+def isolated_live_service(tmp_path: Path, set_live_mode) -> LiveRiskService:
     """Creates a LiveRiskService backed by an isolated temporary database."""
+    set_live_mode("replay")
     test_db = tmp_path / "test_live_risk.db"
     storage = WeatherStorage(db_path=test_db)
     storage.init_db()
@@ -151,3 +152,78 @@ def test_historical_risk_endpoints_regression():
     assert len(risk_data["segments"]) == 151
     assert "summary" in risk_data
     assert "metadata" in risk_data
+
+
+from src.services.live_risk_service import LiveRiskComputationDisabledError
+
+
+def test_compute_live_risk_off_mode_without_source_runs_no_unqualified_query(isolated_live_service: LiveRiskService, set_live_mode, monkeypatch):
+    """When ROUTEWISE_LIVE_MODE is 'off' and source=None, raises LiveRiskComputationDisabledError and runs no storage queries."""
+    set_live_mode("off")
+    query_executed = False
+
+    def spy_get_observations(*args, **kwargs):
+        nonlocal query_executed
+        query_executed = True
+        return isolated_live_service.storage.__class__.get_observations(isolated_live_service.storage, *args, **kwargs)
+
+    monkeypatch.setattr(isolated_live_service.storage, "get_observations", spy_get_observations)
+
+    with pytest.raises(LiveRiskComputationDisabledError, match="Live-risk computation is disabled by configuration"):
+        isolated_live_service.compute_live_risk(as_of="2024-07-07", source=None)
+
+    assert not query_executed, "Unqualified query was executed when live risk computation should be disabled!"
+
+
+def test_off_mode_api_returns_409_conflict(set_live_mode):
+    """When ROUTEWISE_LIVE_MODE is 'off', reachable scenario step API endpoint returns HTTP 409 Conflict."""
+    set_live_mode("off")
+    admin_token = auth_service.create_token(user_id=1, email="admin@routewise.ai", role="admin")
+    resp = client.post(
+        "/api/v1/alerts/scenario/step",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"step_index": 0},
+    )
+    assert resp.status_code == 409, f"Expected 409 Conflict, got {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert "Live-risk computation is disabled by configuration" in data["detail"]
+
+
+def test_explicit_source_works_in_off_mode(isolated_live_service: LiveRiskService, set_live_mode):
+    """Explicit source='replay' or source='open-meteo' still computes successfully in off mode."""
+    set_live_mode("off")
+    provider = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    df_7days = provider.fetch(start_date="2024-07-01", end_date="2024-07-07")
+    isolated_live_service.storage.upsert_observations(df_7days)
+
+    preds = isolated_live_service.compute_live_risk(as_of="2024-07-07", source="replay")
+    assert len(preds) == 151
+    assert any(p["status"] == "OK" for p in preds)
+
+
+def test_unrelated_error_not_converted_to_409(set_live_mode, monkeypatch):
+    """Unrelated client errors or unexpected server exceptions are not swallowed or converted into 409."""
+    set_live_mode("off")
+    admin_token = auth_service.create_token(user_id=1, email="admin@routewise.ai", role="admin")
+
+    # 1. Validation error produces 422, not 409
+    resp_val = client.post(
+        "/api/v1/alerts/scenario/step",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"step_index": 99},  # Invalid step index
+    )
+    assert resp_val.status_code == 422, f"Expected 422 Validation Error, got {resp_val.status_code}"
+    assert resp_val.status_code != 409
+
+    # 2. Unexpected server error is not converted to 409
+    from src.services.alert_service import alert_service
+    def fake_crash(*args, **kwargs):
+        raise RuntimeError("Unexpected internal crash")
+    monkeypatch.setattr(alert_service, "step_replay_scenario", fake_crash)
+
+    with pytest.raises(RuntimeError, match="Unexpected internal crash"):
+        client.post(
+            "/api/v1/alerts/scenario/step",
+            headers={"Authorization": f"Bearer {admin_token}"},
+            json={"step_index": 0},
+        )

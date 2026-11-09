@@ -94,7 +94,8 @@ def test_sse_heartbeat_emission():
     assert '"status": "alive"' in response.text
 
 
-def test_compute_live_risk_emits_valid_sse_event(tmp_path: Path):
+def test_compute_live_risk_emits_valid_sse_event(tmp_path: Path, set_live_mode):
+    set_live_mode("replay")
     """Regression test for Fix 1: compute_live_risk must emit a valid risk_update frame to SSE subscribers."""
     test_db = tmp_path / "test_live_broadcast.db"
     storage = WeatherStorage(db_path=test_db)
@@ -129,8 +130,9 @@ def test_compute_live_risk_emits_valid_sse_event(tmp_path: Path):
         live_broadcaster.unsubscribe(q)
 
 
-def test_failing_broadcaster_does_not_break_compute_live_risk(tmp_path: Path, monkeypatch):
+def test_failing_broadcaster_does_not_break_compute_live_risk(tmp_path: Path, monkeypatch, set_live_mode):
     """Verifies that if broadcaster raises an exception, live_risk rows are still committed successfully."""
+    set_live_mode("replay")
     test_db = tmp_path / "test_broadcaster_fail.db"
     storage = WeatherStorage(db_path=test_db)
     storage.init_db()

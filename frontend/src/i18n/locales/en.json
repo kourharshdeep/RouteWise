@@ -222,6 +222,7 @@
     "acknowledged": "Acknowledged",
     "active": "Active",
     "simulated_tag": "SIMULATED",
+    "lastKnownDataStale": "Last known, data stale",
     "scenario_title": "Multi-Day Storm Scenario",
     "advance_phase": "Advance Storm Phase",
     "reset_baseline": "Reset to Baseline"

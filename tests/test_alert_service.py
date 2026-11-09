@@ -215,8 +215,9 @@ def test_in_app_boundary_disclaimer():
     assert "No SMS" in body["delivery_notice"]
 
 
-def test_replay_scenario_storm_progression(auth_tokens):
+def test_replay_scenario_storm_progression(auth_tokens, set_live_mode):
     """Executes multi-day storm demo steps, verifying alerts fire, routes turn to HOLD, and recovery clears."""
+    set_live_mode("replay")
     # Step 0: Normal Baseline (2023-07-06)
     res_step0 = client.post(
         "/api/v1/alerts/scenario/step",
@@ -254,3 +255,214 @@ def test_replay_scenario_storm_progression(auth_tokens):
     assert d4["step"] == 4
     assert d4["phase"] == "Post-Storm Clearance"
     assert d4["route_recommendation"] != "HOLD"
+
+
+def test_stale_high_risk_alert_retention():
+    """Proves a stale high_risk alert remains ACTIVE with is_stale_context=True."""
+    alert_service.clear_all_alerts()
+    t0 = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+    sid = "seg_test_stale_01"
+
+    # 1. Fresh state with high risk: creates active alert
+    fresh_payload = [{"segment_id": sid, "risk_score": 0.82, "is_stale": False, "operational_status": "OPEN"}]
+    alert_service.sync_alerts_from_live_state(live_risk_payload=fresh_payload, active_events=[], now_dt=t0)
+
+    alerts_t0 = alert_service.get_active_alerts()
+    assert len(alerts_t0) == 1
+    assert alerts_t0[0]["alert_type"] == "high_risk"
+    assert alerts_t0[0]["status"] == "active"
+    assert alerts_t0[0]["is_stale_context"] is False
+
+    # 2. At T+25h: risk data is stale
+    t_stale = t0 + timedelta(hours=25)
+    stale_payload = [{"segment_id": sid, "risk_score": 0.82, "is_stale": True, "operational_status": "OPEN"}]
+    alert_service.sync_alerts_from_live_state(live_risk_payload=stale_payload, active_events=[], now_dt=t_stale)
+
+    alerts_stale = alert_service.get_active_alerts()
+    high_alerts = [a for a in alerts_stale if a["alert_type"] == "high_risk"]
+    assert len(high_alerts) == 1
+    assert high_alerts[0]["status"] == "active"
+    assert high_alerts[0]["is_stale_context"] is True
+
+
+def test_closure_alert_unaffected_by_risk_staleness():
+    """Closure alerts come from hazard events, not model; unchanged by risk staleness (is_stale_context=False)."""
+    alert_service.clear_all_alerts()
+    t0 = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+    sid = "seg_test_closure_01"
+
+    ev = {
+        "id": "ev_01",
+        "segment_id": sid,
+        "hazard_type": "landslide",
+        "severity": "critical",
+        "status": "active",
+        "expires_at": (t0 + timedelta(hours=5)).isoformat(),
+    }
+    # Evaluated with stale risk data
+    stale_payload = [{"segment_id": sid, "risk_score": None, "is_stale": True, "operational_status": "CLOSED"}]
+    alert_service.sync_alerts_from_live_state(live_risk_payload=stale_payload, active_events=[ev], now_dt=t0)
+
+    alerts = alert_service.get_active_alerts()
+    closure_alerts = [a for a in alerts if a["alert_type"] == "closure"]
+    assert len(closure_alerts) == 1
+    assert closure_alerts[0]["status"] == "active"
+    assert closure_alerts[0]["is_stale_context"] is False
+
+
+def test_stale_alert_text_immutability():
+    """Database title and description remain byte-for-byte unchanged after stale evaluations."""
+    alert_service.clear_all_alerts()
+    t0 = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+    sid = "seg_test_immut_01"
+
+    fresh_payload = [{"segment_id": sid, "risk_score": 0.75, "is_stale": False, "operational_status": "OPEN"}]
+    alert_service.sync_alerts_from_live_state(live_risk_payload=fresh_payload, active_events=[], now_dt=t0)
+
+    with alert_service._get_connection() as conn:
+        row_before = dict(conn.execute("SELECT * FROM alert WHERE segment_id = ?", (sid,)).fetchone())
+
+    # Stale evaluation
+    stale_payload = [{"segment_id": sid, "risk_score": 0.75, "is_stale": True, "operational_status": "OPEN"}]
+    alert_service.sync_alerts_from_live_state(live_risk_payload=stale_payload, active_events=[], now_dt=t0 + timedelta(hours=25))
+
+    with alert_service._get_connection() as conn:
+        row_after = dict(conn.execute("SELECT * FROM alert WHERE segment_id = ?", (sid,)).fetchone())
+
+    assert row_after["title_en"] == row_before["title_en"]
+    assert row_after["title_hi"] == row_before["title_hi"]
+    assert row_after["message_en"] == row_before["message_en"]
+    assert row_after["message_hi"] == row_before["message_hi"]
+    assert "last known, data stale" not in row_after["title_en"]
+    assert row_after["is_stale_context"] == 1
+
+
+def test_stale_alert_recovery():
+    """Repeated stale evaluations do not duplicate alerts or mutate text; fresh low-risk resolves alert."""
+    alert_service.clear_all_alerts()
+    t0 = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+    sid = "seg_test_recov_01"
+
+    # 1. Fresh high-risk
+    alert_service.sync_alerts_from_live_state(
+        live_risk_payload=[{"segment_id": sid, "risk_score": 0.85, "is_stale": False, "operational_status": "OPEN"}],
+        active_events=[],
+        now_dt=t0,
+    )
+    with alert_service._get_connection() as conn:
+        orig_title = conn.execute("SELECT title_en FROM alert WHERE segment_id = ?", (sid,)).fetchone()["title_en"]
+
+    # 2. Repeated stale evaluations (T+25h, T+26h, T+27h)
+    for hr in (25, 26, 27):
+        alert_service.sync_alerts_from_live_state(
+            live_risk_payload=[{"segment_id": sid, "risk_score": 0.85, "is_stale": True, "operational_status": "OPEN"}],
+            active_events=[],
+            now_dt=t0 + timedelta(hours=hr),
+        )
+
+    alerts = alert_service.get_active_alerts()
+    high_alerts = [a for a in alerts if a["alert_type"] == "high_risk"]
+    assert len(high_alerts) == 1, "Repeated stale evaluations must not duplicate high_risk alerts"
+    assert high_alerts[0]["title_en"] == orig_title, "Title must not be mutated"
+    assert high_alerts[0]["is_stale_context"] is True
+
+    # 3. Fresh low-risk arrives at T+48h: resolves alert
+    alert_service.sync_alerts_from_live_state(
+        live_risk_payload=[{"segment_id": sid, "risk_score": 0.05, "is_stale": False, "operational_status": "OPEN"}],
+        active_events=[],
+        now_dt=t0 + timedelta(hours=48),
+    )
+    alerts_after = alert_service.get_active_alerts()
+    high_after = [a for a in alerts_after if a["alert_type"] == "high_risk"]
+    assert len(high_after) == 0, "Fresh low risk data must resolve the high_risk alert"
+
+
+def test_closure_alert_resolves_only_when_event_closed():
+    """Closure alerts stay active through risk staleness and resolve only when hazard event clears."""
+    alert_service.clear_all_alerts()
+    t0 = datetime(2026, 11, 1, 10, 0, 0, tzinfo=timezone.utc)
+    sid = "seg_test_close_res_01"
+
+    ev = {
+        "id": "ev_close_01",
+        "segment_id": sid,
+        "hazard_type": "landslide",
+        "severity": "critical",
+        "status": "active",
+        "expires_at": (t0 + timedelta(hours=10)).isoformat(),
+    }
+    # Active hazard with stale telemetry
+    alert_service.sync_alerts_from_live_state(
+        live_risk_payload=[{"segment_id": sid, "risk_score": None, "is_stale": True, "operational_status": "CLOSED"}],
+        active_events=[ev],
+        now_dt=t0,
+    )
+    alerts = alert_service.get_active_alerts()
+    assert any(a["alert_type"] == "closure" and a["status"] == "active" for a in alerts)
+
+    # Hazard cleared
+    alert_service.sync_alerts_from_live_state(
+        live_risk_payload=[{"segment_id": sid, "risk_score": 0.1, "is_stale": False, "operational_status": "OPEN"}],
+        active_events=[],
+        now_dt=t0 + timedelta(hours=1),
+    )
+    alerts_cleared = alert_service.get_active_alerts()
+    assert not any(a["alert_type"] == "closure" for a in alerts_cleared)
+
+
+def test_alert_api_response_and_legacy_schema_migration(tmp_path):
+    """Verifies that an old-schema DB without is_stale_context is migrated safely and loads via API."""
+    import sqlite3
+    import contextlib
+    from src.services.weather.storage import WeatherStorage
+    from src.services.alert_service import AlertService
+
+    old_db_path = tmp_path / "legacy_alerts.db"
+    with contextlib.closing(sqlite3.connect(str(old_db_path))) as conn:
+        conn.execute(
+            """
+            CREATE TABLE alert (
+                id TEXT PRIMARY KEY,
+                segment_id TEXT NOT NULL,
+                alert_type TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                title_en TEXT NOT NULL,
+                title_hi TEXT NOT NULL,
+                message_en TEXT NOT NULL,
+                message_hi TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                is_simulated INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                acknowledged_at TEXT,
+                acknowledged_by INTEGER,
+                cleared_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO alert (id, segment_id, alert_type, severity, title_en, title_hi, message_en, message_hi, status, is_simulated, created_at)
+            VALUES ('old_alert_01', 'seg_old_01', 'high_risk', 'warning', 'Legacy Title', '?????? ??????', 'Legacy Msg', '?????? ?????', 'active', 0, '2026-10-01T00:00:00Z');
+            """
+        )
+        conn.commit()
+
+    storage = WeatherStorage(db_path=old_db_path)
+    legacy_service = AlertService(storage=storage)
+    # Run migration
+    legacy_service.init_db()
+
+    # Verify column exists and old row has is_stale_context=0
+    with contextlib.closing(sqlite3.connect(str(old_db_path))) as conn:
+        cols = [info[1] for info in conn.execute("PRAGMA table_info(alert)").fetchall()]
+        assert "is_stale_context" in cols
+        row = conn.execute("SELECT is_stale_context FROM alert WHERE id = 'old_alert_01'").fetchone()
+        assert row[0] == 0
+
+    # Verify reading via service formats is_stale_context as False
+    active = legacy_service.get_active_alerts()
+    assert len(active) == 1
+    assert active[0]["is_stale_context"] is False
+
+    # Second init_db is idempotent
+    legacy_service.init_db()

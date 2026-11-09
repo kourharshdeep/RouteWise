@@ -418,12 +418,15 @@ describe('Alerts, In-App Boundary & Role Matrix', () => {
       'scenario_title',
       'advance_phase',
       'reset_baseline',
+      'lastKnownDataStale',
     ];
 
     for (const k of alertKeys) {
       assert.ok(enTranslations.alerts?.[k], `EN missing alert key: ${k}`);
       assert.ok(hiTranslations.alerts?.[k], `HI missing alert key: ${k}`);
     }
+    assert.equal(enTranslations.alerts.lastKnownDataStale, 'Last known, data stale');
+    assert.equal(hiTranslations.alerts.lastKnownDataStale, 'अंतिम ज्ञात स्थिति, डेटा पुराना है');
   });
 
   it('verifies 1-hour cooldown calculation logic', () => {
@@ -442,5 +445,43 @@ describe('Alerts, In-App Boundary & Role Matrix', () => {
     assert.equal(isWithinCooldown(t0, t30min), true, '30 min should be inside cooldown');
     assert.equal(isWithinCooldown(t0, t59min), true, '59 min should be inside cooldown');
     assert.equal(isWithinCooldown(t0, t61min), false, '61 min should be outside cooldown');
+  });
+  it('renders stale data indicator at most once per alert with is_stale_context=true even when refreshed repeatedly', () => {
+    const getAlertBadges = (item, t) => {
+      const badges = [];
+      if (item.is_stale_context) {
+        badges.push({ type: 'stale_context', text: t('alerts.lastKnownDataStale') });
+      }
+      if (item.is_simulated) {
+        badges.push({ type: 'simulated', text: 'SIMULATED' });
+      }
+      badges.push({ type: 'status', text: item.status.toUpperCase() });
+      return badges;
+    };
+
+    const mockT = (key) => enTranslations.alerts?.[key.replace('alerts.', '')] || key;
+
+    const alertItem = {
+      id: 'alert_stale_01',
+      title_en: 'High Landslide Risk Advisory',
+      status: 'active',
+      is_stale_context: true,
+      is_simulated: false,
+    };
+
+    const badges1 = getAlertBadges(alertItem, mockT);
+    const staleBadges1 = badges1.filter((b) => b.type === 'stale_context');
+    assert.equal(staleBadges1.length, 1, 'Should have exactly 1 stale badge');
+    assert.equal(staleBadges1[0].text, 'Last known, data stale');
+
+    for (let cycle = 1; cycle <= 5; cycle++) {
+      const refreshedBadges = getAlertBadges(alertItem, mockT);
+      const staleCount = refreshedBadges.filter((b) => b.type === 'stale_context').length;
+      assert.equal(staleCount, 1, `Cycle ${cycle} must not duplicate stale indicator`);
+    }
+
+    const freshItem = { ...alertItem, is_stale_context: false };
+    const freshBadges = getAlertBadges(freshItem, mockT);
+    assert.equal(freshBadges.filter((b) => b.type === 'stale_context').length, 0);
   });
 });

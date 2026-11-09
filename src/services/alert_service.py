@@ -58,6 +58,13 @@ ALERT_TEMPLATES = {
         "message_en": "Intense cumulative rainfall ({precip_mm} mm) observed along segment {segment_id}.",
         "message_hi": "खंड {segment_id} पर भारी संचयी वर्षा ({precip_mm} मिमी) दर्ज की गई।",
     },
+    "system_health": {
+        "severity": "warning",
+        "title_en": "Live Data Stale",
+        "title_hi": "लाइव डेटा पुराना",
+        "message_en": "Live data stale: corridor telemetry exceeds 24-hour operational limit. Holding last known alerts active.",
+        "message_hi": "लाइव डेटा पुराना: गलियारे के अवलोकन 24 घंटे की परिचालन सीमा से अधिक हैं। पूर्व सलाहकारियां सक्रिय रखी गई हैं।",
+    },
     "telemetry_stale": {
         "severity": "advisory",
         "title_en": "Stale Telemetry Advisory",
@@ -147,6 +154,7 @@ class AlertService:
                     message_hi TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
                     is_simulated INTEGER NOT NULL DEFAULT 0,
+                    is_stale_context INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     acknowledged_at TEXT,
                     acknowledged_by INTEGER,
@@ -157,6 +165,10 @@ class AlertService:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_status ON alert(status);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_seg_type ON alert(segment_id, alert_type, status);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_alert_created ON alert(created_at);")
+            # Additive migration for existing alert tables lacking is_stale_context
+            columns = [info[1] for info in conn.execute("PRAGMA table_info(alert)").fetchall()]
+            if "is_stale_context" not in columns:
+                conn.execute("ALTER TABLE alert ADD COLUMN is_stale_context INTEGER NOT NULL DEFAULT 0;")
             conn.commit()
 
     def should_create_alert(
@@ -256,8 +268,8 @@ class AlertService:
                 """
                 INSERT INTO alert (
                     id, segment_id, alert_type, severity, title_en, title_hi,
-                    message_en, message_hi, status, is_simulated, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                    message_en, message_hi, status, is_simulated, is_stale_context, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 0, ?)
                 """,
                 (
                     alert_id,
@@ -285,6 +297,7 @@ class AlertService:
             "message_hi": eff_msg_hi,
             "status": "active",
             "is_simulated": is_simulated,
+            "is_stale_context": False,
             "created_at": now_iso,
             "acknowledged_at": None,
             "acknowledged_by": None,
@@ -366,11 +379,11 @@ class AlertService:
 
         if live_risk_payload is None:
             from src.services.live_risk_service import live_risk_service
-            live_risk_payload = live_risk_service.get_latest_live_risk()
+            live_risk_payload = live_risk_service.get_latest_live_risk(eval_time=now)
 
         if active_events is None:
             from src.services.hazard_event_service import hazard_event_service
-            active_events = hazard_event_service.get_active_events()
+            active_events = hazard_event_service.get_active_events(now=now)
 
         events_by_seg: Dict[str, List[Dict[str, Any]]] = {}
         for ev in active_events:
@@ -390,13 +403,15 @@ class AlertService:
             sid = seg["segment_id"] if isinstance(seg, dict) else getattr(seg, "segment_id", None)
             if not sid:
                 continue
+            is_stale = seg.get("is_stale", False) if isinstance(seg, dict) else getattr(seg, "is_stale", False)
             score = seg.get("risk_score") if isinstance(seg, dict) else getattr(seg, "risk_score", None)
             op_status = seg.get("operational_status", "OPEN") if isinstance(seg, dict) else getattr(seg, "operational_status", "OPEN")
             is_sim = seg.get("has_simulated_event", False) if isinstance(seg, dict) else getattr(seg, "has_simulated_event", False)
             seg_events = events_by_seg.get(sid, [])
 
-            # 1. Road Closure Alert
             is_closed = op_status == "CLOSED" or any(ev["severity"] == "critical" and ev["status"] == "active" for ev in seg_events)
+
+            # 1. Road Closure Alert (Hazard event-derived; independent of risk staleness)
             if is_closed:
                 res = self.create_alert(
                     segment_id=sid,
@@ -410,22 +425,47 @@ class AlertService:
             else:
                 cleared_count += self.auto_clear_alerts(sid, "closure", now)
 
-            # 2. High Risk Score Alert
-            if score is not None and score >= 0.35:
-                res = self.create_alert(
-                    segment_id=sid,
-                    alert_type="high_risk",
-                    severity="critical" if score >= 0.50 else "warning",
-                    template_kwargs={"score_pct": f"{score * 100:.1f}"},
-                    is_simulated=is_sim,
-                    now_dt=now,
-                )
-                if res:
-                    created_count += 1
+            # 2. High Risk Score Alert (Model-derived; tracks risk staleness)
+            if is_stale:
+                # Active high_risk alerts are retained with is_stale_context=True without text mutation
+                with self._get_connection() as conn:
+                    conn.execute(
+                        """
+                        UPDATE alert
+                        SET is_stale_context = 1
+                        WHERE segment_id = ? AND alert_type = 'high_risk' AND status IN ('active', 'acknowledged')
+                        """,
+                        (sid,),
+                    )
+                    conn.commit()
             else:
-                cleared_count += self.auto_clear_alerts(sid, "high_risk", now)
+                if score is not None and score >= 0.35:
+                    res = self.create_alert(
+                        segment_id=sid,
+                        alert_type="high_risk",
+                        severity="critical" if score >= 0.50 else "warning",
+                        template_kwargs={"score_pct": f"{score * 100:.1f}"},
+                        is_simulated=is_sim,
+                        now_dt=now,
+                    )
+                    if res:
+                        created_count += 1
+                    else:
+                        with self._get_connection() as conn:
+                            conn.execute(
+                                """
+                                UPDATE alert
+                                SET is_stale_context = 0
+                                WHERE segment_id = ? AND alert_type = 'high_risk' AND status IN ('active', 'acknowledged')
+                                """,
+                                (sid,),
+                            )
+                            conn.commit()
+                else:
+                    # Auto-clear only when fresh data shows the risk dropped below 0.35
+                    cleared_count += self.auto_clear_alerts(sid, "high_risk", now)
 
-            # 3. Hazard Disruption Alert
+            # 3. Hazard Disruption Alert (Event-derived; independent of risk staleness)
             non_closure_hazards = [ev for ev in seg_events if ev.get("severity") in ("high", "medium")]
             if non_closure_hazards:
                 primary_hazard = non_closure_hazards[0].get("hazard_type", "hazard")
@@ -441,6 +481,25 @@ class AlertService:
                     created_count += 1
             else:
                 cleared_count += self.auto_clear_alerts(sid, "hazard_disruption", now)
+
+        # System health alert for live telemetry staleness
+        any_stale = any(
+            (seg.get("is_stale", False) if isinstance(seg, dict) else getattr(seg, "is_stale", False))
+            for seg in segments
+        )
+        if any_stale:
+            res_stale = self.create_alert(
+                segment_id="corridor",
+                alert_type="system_health",
+                severity="warning",
+                title_en="Live Data Stale",
+                message_en="Live data stale: corridor telemetry exceeds 24-hour operational limit. Holding last known alerts active.",
+                now_dt=now,
+            )
+            if res_stale:
+                created_count += 1
+        else:
+            cleared_count += self.auto_clear_alerts("corridor", "system_health", now)
 
         return {"created": created_count, "cleared": cleared_count}
 
@@ -589,6 +648,7 @@ class AlertService:
     def _format_alert(self, d: Dict[str, Any]) -> Dict[str, Any]:
         """Formats an alert dictionary and injects in-app delivery boundary metadata."""
         d["is_simulated"] = bool(d.get("is_simulated", 0))
+        d["is_stale_context"] = bool(d.get("is_stale_context", 0))
         d["delivery_channel"] = "in_app_only"
         d["delivery_notice"] = IN_APP_DELIVERY_NOTICE
         return d
@@ -599,6 +659,13 @@ class AlertService:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid scenario step_index {step_index}. Valid indices: 0 to {len(SCENARIO_STEPS) - 1}.",
+            )
+
+        from src.api.config import settings
+        if settings.live_mode == "off":
+            from src.services.live_risk_service import LiveRiskComputationDisabledError
+            raise LiveRiskComputationDisabledError(
+                "Live-risk computation is disabled by configuration (ROUTEWISE_LIVE_MODE is 'off')."
             )
 
         step_cfg = SCENARIO_STEPS[step_index]
@@ -634,10 +701,10 @@ class AlertService:
 
         # 3. Compute live risk for target date (eval time matches replay scenario)
         scenario_eval_time = datetime.strptime(target_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) + timedelta(hours=12)
-        live_risk = live_risk_service.compute_live_risk(as_of=target_date, eval_time=scenario_eval_time)
+        live_risk = live_risk_service.compute_live_risk(as_of=target_date, eval_time=scenario_eval_time, source="replay")
 
         # 4. Synchronize alerts with current corridor state
-        self.sync_alerts_from_live_state(live_risk_payload=live_risk)
+        self.sync_alerts_from_live_state(live_risk_payload=live_risk, now_dt=scenario_eval_time)
 
         # 5. Evaluate journey planner route recommendation on corridor
         from src.api.schemas.journey import JourneyPlanRequest
@@ -647,7 +714,7 @@ class AlertService:
             mode="live",
             date=target_date,
         )
-        plan_res = journey_service.plan_journey(plan_req)
+        plan_res = journey_service.plan_journey(plan_req, now=scenario_eval_time)
 
         active_alerts = self.get_active_alerts()
         op_status = plan_res.overall_route_risk

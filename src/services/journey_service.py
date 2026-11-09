@@ -57,8 +57,47 @@ class JourneyService:
         self.sorted_segments_path = sorted_segments_path or settings.sorted_segments_path
         self._places: List[JourneyPlace] = []
         self._sorted_segment_ids: List[str] = []
+        self._places_by_id: Dict[str, JourneyPlace] = {}
+        self._places_by_name: Dict[str, JourneyPlace] = {}
+        self._place_to_sorted_idx: Dict[str, int] = {}
+        self._features_by_id: Dict[str, Any] = {}
+        self._segment_props: Dict[str, Any] = {}
         self._load_places()
         self._load_sorted_segments()
+        self._init_static_lookups()
+
+    def _init_static_lookups(self) -> None:
+        """Precomputes immutable static maps for landmarks, segment properties, and indices."""
+        for p in self._places:
+            self._places_by_id[p.id.lower()] = p
+            self._places_by_name[p.name.lower()] = p
+
+        geojson = corridor_service.get_corridor_geojson()
+        self._features_by_id = {f.id: f for f in geojson.features}
+        self._segment_props = {f.id: f.properties for f in geojson.features if f.properties}
+
+        if not self._sorted_segment_ids:
+            self._sorted_segment_ids = [f.id for f in geojson.features]
+
+        # Precompute nearest sorted segment index for each known landmark
+        for p in self._places:
+            self._place_to_sorted_idx[p.id] = self._find_nearest_sorted_segment_index(
+                p.lat, p.lon, self._features_by_id
+            )
+
+    def reset_static_cache(self) -> None:
+        """Resets and re-indexes static corridor geometry and landmarks (for tests)."""
+        self._places.clear()
+        self._sorted_segment_ids.clear()
+        self._places_by_id.clear()
+        self._places_by_name.clear()
+        self._place_to_sorted_idx.clear()
+        self._features_by_id.clear()
+        self._segment_props.clear()
+        corridor_service._geojson_cache = None
+        self._load_places()
+        self._load_sorted_segments()
+        self._init_static_lookups()
 
     def _load_sorted_segments(self) -> None:
         """Loads monotonically chainage-ordered corridor segment IDs."""
@@ -211,20 +250,24 @@ class JourneyService:
                 ),
             )
 
-    def plan_journey(self, req: JourneyPlanRequest) -> JourneyPlanResponse:
+    def plan_journey(self, req: JourneyPlanRequest, now: Optional[datetime] = None) -> JourneyPlanResponse:
         """Plans a corridor journey with segment hazard profiling, vehicle advisories, and MultiObjectiveRouter."""
         # 1. Resolve Origin and Destination
         origin_clean = req.origin.strip().lower()
         dest_clean = req.destination.strip().lower()
 
-        origin_p = next(
-            (p for p in self._places if p.id == origin_clean or p.name.lower() == origin_clean or origin_clean in p.name.lower()),
-            None,
-        )
-        dest_p = next(
-            (p for p in self._places if p.id == dest_clean or p.name.lower() == dest_clean or dest_clean in p.name.lower()),
-            None,
-        )
+        origin_p = self._places_by_id.get(origin_clean) or self._places_by_name.get(origin_clean)
+        if not origin_p:
+            origin_p = next(
+                (p for p in self._places if p.id == origin_clean or p.name.lower() == origin_clean or origin_clean in p.name.lower()),
+                None,
+            )
+        dest_p = self._places_by_id.get(dest_clean) or self._places_by_name.get(dest_clean)
+        if not dest_p:
+            dest_p = next(
+                (p for p in self._places if p.id == dest_clean or p.name.lower() == dest_clean or dest_clean in p.name.lower()),
+                None,
+            )
 
         if not origin_p:
             origin_p = self._places[0] if self._places else JourneyPlace(
@@ -241,15 +284,28 @@ class JourneyService:
                 detail="Origin and Destination must be different corridor locations.",
             )
 
-        # 2. Fetch corridor highway geometry
-        geojson = corridor_service.get_corridor_geojson()
-        features_by_id = {f.id: f for f in geojson.features}
+        # 2. Fetch corridor highway geometry and segment indices
+        orig_idx = self._place_to_sorted_idx.get(origin_p.id)
+        if orig_idx is None:
+            orig_idx = self._find_nearest_sorted_segment_index(origin_p.lat, origin_p.lon, self._features_by_id)
 
-        if not self._sorted_segment_ids:
-            self._sorted_segment_ids = [f.id for f in geojson.features]
+        dest_idx = self._place_to_sorted_idx.get(dest_p.id)
+        if dest_idx is None:
+            dest_idx = self._find_nearest_sorted_segment_index(dest_p.lat, dest_p.lon, self._features_by_id)
 
-        orig_idx = self._find_nearest_sorted_segment_index(origin_p.lat, origin_p.lon, features_by_id)
-        dest_idx = self._find_nearest_sorted_segment_index(dest_p.lat, dest_p.lon, features_by_id)
+        if (
+            orig_idx is None
+            or dest_idx is None
+            or orig_idx >= len(self._sorted_segment_ids)
+            or dest_idx >= len(self._sorted_segment_ids)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    f"Data integrity error: Corridor segment index out of range "
+                    f"(origin={orig_idx}, destination={dest_idx}, total_segments={len(self._sorted_segment_ids)})."
+                ),
+            )
 
         step = 1 if dest_idx >= orig_idx else -1
         selected_segment_ids = self._sorted_segment_ids[orig_idx : dest_idx + step : step]
@@ -273,16 +329,27 @@ class JourneyService:
         if mode == "live":
             from src.services.live_risk_service import live_risk_service
 
-            live_risk = live_risk_service.get_latest_live_risk(as_of=req.date)
-            live_status = live_risk_service.get_live_status()
+            live_risk = live_risk_service.get_latest_live_risk(as_of=req.date, eval_time=now)
 
             journey_date_str = req.date or live_risk.get("as_of") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
             for seg in live_risk.get("segments", []):
                 risk_lookup[seg["segment_id"]] = seg
 
+            effective_now = now or datetime.now(timezone.utc)
+            comp_at_str = live_risk.get("computed_at")
+            is_older_than_24h = False
+            if comp_at_str:
+                try:
+                    comp_dt = datetime.fromisoformat(comp_at_str.replace("Z", "+00:00"))
+                    if (effective_now - comp_dt).total_seconds() > 24 * 3600:
+                        is_older_than_24h = True
+                except Exception:
+                    pass
+
             is_live_stale = (
-                any(seg.get("is_stale", False) for seg in live_risk.get("segments", []))
+                is_older_than_24h
+                or any(seg.get("is_stale", False) for seg in live_risk.get("segments", []))
                 or (live_risk.get("as_of") is None)
             )
         else:
@@ -308,22 +375,18 @@ class JourneyService:
         bottlenecks: List[str] = []
 
         for seq, sid in enumerate(selected_segment_ids, start=1):
-            feat = features_by_id.get(sid)
-            if not feat or not feat.properties:
-                logger.error(f"Data integrity error: Corridor segment '{sid}' is missing feature properties.")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Data integrity error: Corridor segment '{sid}' is missing required physical properties.",
-                )
-
-            props = feat.properties
+            props = self._segment_props.get(sid)
+            if not props:
+                feat = self._features_by_id.get(sid)
+                props = feat.properties if feat else None
             if (
-                props.length_m is None
+                props is None
+                or props.length_m is None
                 or props.slope is None
                 or props.elevation_m is None
                 or not props.highway
             ):
-                logger.error(f"Data integrity error: Segment '{sid}' is missing required static attributes: {props}")
+                logger.error(f"Data integrity error: Corridor segment '{sid}' is missing required static attributes: {props}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Data integrity error: Corridor segment '{sid}' is missing required physical properties.",
@@ -437,7 +500,7 @@ class JourneyService:
             overall_risk = "High"
         elif med_count > 0 or (max_score is not None and max_score >= 0.10):
             overall_risk = "Medium"
-        elif unknown_count > 0:
+        elif unknown_count > 0 or is_live_stale:
             overall_risk = "Unknown"
         else:
             overall_risk = "Low"
@@ -447,8 +510,8 @@ class JourneyService:
         for i, sid in enumerate(selected_segment_ids):
             u_node = f"node_{i}"
             v_node = f"node_{i + 1}"
-            feat = features_by_id.get(sid)
-            seg_len = feat.properties.length_m if feat and feat.properties else 200.0
+            props = self._segment_props.get(sid)
+            seg_len = props.length_m if props else 200.0
             seg_travel_time = (seg_len / 1000.0) / max(speed, 10.0) * 3600.0
             r_entry = risk_lookup.get(sid)
             s_val = r_entry.get("risk_score") if isinstance(r_entry, dict) else getattr(r_entry, "risk_score", None) if r_entry else None

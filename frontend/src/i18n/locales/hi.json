@@ -222,6 +222,7 @@
     "acknowledged": "स्वीकृत",
     "active": "सक्रिय",
     "simulated_tag": "सिम्युलेटेड",
+    "lastKnownDataStale": "अंतिम ज्ञात स्थिति, डेटा पुराना है",
     "scenario_title": "बहु-दिवसीय तूफान परिदृश्य",
     "advance_phase": "तूफान चरण आगे बढ़ाएं",
     "reset_baseline": "आधार रेखा पर रीसेट करें"

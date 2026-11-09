@@ -94,7 +94,8 @@ class WeatherScheduler:
             try:
                 from src.services.live_risk_service import LiveRiskService, live_risk_service
                 risk_svc = LiveRiskService(storage=self.storage) if self.storage is not None else live_risk_service
-                await loop.run_in_executor(None, risk_svc.compute_live_risk)
+                source_to_use = "open-meteo" if self.mode == "live" else "replay"
+                await loop.run_in_executor(None, lambda: risk_svc.compute_live_risk(source=source_to_use))
                 logger.info("Live risk recomputed successfully following weather fetch.")
             except Exception as e:
                 logger.error("Error recomputing live risk post-fetch: %s", e)

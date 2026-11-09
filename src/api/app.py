@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.config import settings
 from src.api.routes import alerts, auth, chat, corridor, disruptions, events, health, journey, live, reports, risk
+from src.services.live_risk_service import LiveRiskComputationDisabledError
 from src.services.weather.scheduler import weather_scheduler
 
 
@@ -34,6 +35,14 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
         lifespan=lifespan,
     )
+
+    # Exception handler for configuration-disabled live risk computation (HTTP 409)
+    @app.exception_handler(LiveRiskComputationDisabledError)
+    async def live_risk_disabled_handler(request: Request, exc: LiveRiskComputationDisabledError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": str(exc)},
+        )
 
     # 1. CORS Middleware configuration
     app.add_middleware(

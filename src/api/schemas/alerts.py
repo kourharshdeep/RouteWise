@@ -29,6 +29,7 @@ class AlertItem(BaseModel):
     message_hi: str
     status: str = Field("active", description="Lifecycle state: active | acknowledged | cleared")
     is_simulated: bool = Field(False, description="Whether alert originated from an operator simulated hazard")
+    is_stale_context: bool = Field(False, description="Whether model-derived alert is active during live risk data staleness")
     created_at: str
     acknowledged_at: Optional[str] = None
     acknowledged_by: Optional[int] = None

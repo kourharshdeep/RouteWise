@@ -11,6 +11,7 @@ Honest Framing:
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import sqlite3
@@ -31,6 +32,11 @@ logger = logging.getLogger("live_risk_service")
 EXPECTED_CHECKPOINT_SHA256 = "68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F963D335054006E"
 
 
+class LiveRiskComputationDisabledError(RuntimeError):
+    """Raised when live-risk computation is disabled by configuration (e.g. ROUTEWISE_LIVE_MODE is 'off')."""
+    pass
+
+
 class LiveRiskService:
     """Evaluates live disruption risk using the existing PyTorch ST-GNN inference engine."""
 
@@ -49,6 +55,17 @@ class LiveRiskService:
         self._engine: Optional[RiskInferenceEngine] = None
         self._static_df: Optional[pd.DataFrame] = None
         self._checkpoint_sha256 = self._compute_checkpoint_sha256()
+        self._initialized_dbs: set[Path] = set()
+        self._risk_rows_cache: Optional[Dict[str, Any]] = None
+
+    def invalidate_cache(self) -> None:
+        """Invalidates in-memory risk cache when records are updated."""
+        self._risk_rows_cache = None
+
+    def reset_db_init(self) -> None:
+        """Clears DB initialization tracking for tests."""
+        self._initialized_dbs.clear()
+        self._risk_rows_cache = None
 
     def _compute_checkpoint_sha256(self) -> str:
         if not self.checkpoint_path.is_file():
@@ -83,29 +100,41 @@ class LiveRiskService:
 
     def init_db(self) -> None:
         """Initializes the live_risk table and indexes in the runtime database."""
-        with self._get_connection() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS live_risk (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    segment_id TEXT NOT NULL,
-                    as_of TEXT NOT NULL,
-                    score REAL,
-                    tier TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    is_stale INTEGER NOT NULL DEFAULT 0,
-                    model_version TEXT NOT NULL,
-                    checkpoint_sha256 TEXT NOT NULL,
-                    weather_window_end TEXT NOT NULL,
-                    computed_at TEXT NOT NULL,
-                    UNIQUE(segment_id, as_of)
-                );
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_as_of ON live_risk(as_of);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_seg_as_of ON live_risk(segment_id, as_of);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_computed ON live_risk(computed_at);")
-            conn.commit()
+        db_path = self.storage.db_path
+        if db_path in self._initialized_dbs and db_path.is_file():
+            try:
+                with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='live_risk'").fetchone():
+                        return
+            except Exception:
+                pass
+            self._initialized_dbs.discard(db_path)
+
+        with contextlib.closing(self._get_connection()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS live_risk (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        segment_id TEXT NOT NULL,
+                        as_of TEXT NOT NULL,
+                        score REAL,
+                        tier TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        is_stale INTEGER NOT NULL DEFAULT 0,
+                        model_version TEXT NOT NULL,
+                        checkpoint_sha256 TEXT NOT NULL,
+                        weather_window_end TEXT NOT NULL,
+                        computed_at TEXT NOT NULL,
+                        UNIQUE(segment_id, as_of)
+                    );
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_as_of ON live_risk(as_of);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_seg_as_of ON live_risk(segment_id, as_of);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_as_of_seg ON live_risk(as_of, segment_id);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_computed ON live_risk(computed_at);")
+        self._initialized_dbs.add(db_path)
 
     def prune_old_records(self, max_history_days: int = 7, eval_time: Optional[datetime] = None) -> int:
         """Enforces a bounded 7-day history limit in live_risk table."""
@@ -124,6 +153,7 @@ class LiveRiskService:
         self,
         as_of: Optional[str] = None,
         eval_time: Optional[datetime] = None,
+        source: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Evaluates ST-GNN risk predictions from weather_observation and persists them."""
         self.init_db()
@@ -140,8 +170,18 @@ class LiveRiskService:
             target_date = as_of
 
         # 2. Extract 7-day lookback window from weather_observation
-        # Prefer 'open-meteo' (or other live provider) unless in replay mode
-        source_filter = "replay" if settings.live_mode == "replay" else None
+        # Prefer specified source, else 'replay' if replay mode, 'open-meteo' if live mode
+        if source is not None:
+            source_filter = source
+        elif settings.live_mode == "replay":
+            source_filter = "replay"
+        elif settings.live_mode == "live":
+            source_filter = "open-meteo"
+        else:
+            raise LiveRiskComputationDisabledError(
+                "Live-risk computation is disabled by configuration (ROUTEWISE_LIVE_MODE is 'off')."
+            )
+
         target_dt = pd.to_datetime(target_date)
         start_dt = target_dt - timedelta(days=6)
         start_date = start_dt.strftime("%Y-%m-%d")
@@ -347,6 +387,8 @@ class LiveRiskService:
             conn.executemany(sql, records)
             conn.commit()
 
+        self.invalidate_cache()
+
         # Enforce bounded 7-day history
         self.prune_old_records(eval_time=effective_eval_time)
 
@@ -382,7 +424,7 @@ class LiveRiskService:
             out.append(d)
         return out
 
-    def get_latest_live_risk(self, as_of: Optional[str] = None) -> Dict[str, Any]:
+    def get_latest_live_risk(self, as_of: Optional[str] = None, eval_time: Optional[datetime] = None) -> Dict[str, Any]:
         """Retrieves the live risk evaluation across all 151 segments (latest or for a specified date)."""
         self.init_db()
         with self._get_connection() as conn:
@@ -392,73 +434,106 @@ class LiveRiskService:
                 latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
                 target_as_of = latest_row[0] if latest_row and latest_row[0] else None
 
-            if not target_as_of and not getattr(self, "_is_computing", False):
-                self._is_computing = True
-                try:
-                    self.compute_live_risk(as_of=target_as_of)
-                finally:
-                    self._is_computing = False
-                if not as_of:
-                    latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
-                    target_as_of = latest_row[0] if latest_row and latest_row[0] else None
-
             if not target_as_of:
+                fallback_ver = (
+                    self._engine.model_version
+                    if self._engine
+                    else (
+                        self._checkpoint_sha256[:16]
+                        if self._checkpoint_sha256 != "CHECKPOINT_NOT_FOUND"
+                        else "UNKNOWN"
+                    )
+                )
                 return {
                     "as_of": None,
                     "computed_at": None,
                     "experimental": True,
                     "disclaimer": "Live data - Experimental - not validated. Relative advisory index.",
-                    "model_version": self._get_engine().model_version,
+                    "model_version": fallback_ver,
                     "checkpoint_sha256": self._checkpoint_sha256,
                     "summary": {"Low": 0, "Medium": 0, "High": 0, "UNKNOWN": 151},
+                    "operational_summary": {"OPEN": 0, "CAUTION": 0, "RESTRICTED": 0, "CLOSED": 0, "UNKNOWN": 151},
                     "segments": [],
                 }
 
-            rows = conn.execute(
-                """
-                SELECT segment_id, as_of, score, tier, status, is_stale,
-                       model_version, checkpoint_sha256, weather_window_end, computed_at
-                FROM live_risk
-                WHERE as_of = ?
-                ORDER BY segment_id ASC
-                """,
-                (target_as_of,),
-            ).fetchall()
+            cache_key = (str(self.storage.db_path), target_as_of)
+            if self._risk_rows_cache and self._risk_rows_cache.get("key") == cache_key:
+                rows = self._risk_rows_cache["rows"]
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT segment_id, as_of, score, tier, status, is_stale,
+                           model_version, checkpoint_sha256, weather_window_end, computed_at
+                    FROM live_risk
+                    WHERE as_of = ?
+                    ORDER BY segment_id ASC
+                    """,
+                    (target_as_of,),
+                ).fetchall()
+                self._risk_rows_cache = {"key": cache_key, "rows": rows}
 
         from src.services.hazard_event_service import hazard_event_service
 
-        events_map = hazard_event_service.get_active_events_by_segment_map()
+        effective_now = eval_time or datetime.now(timezone.utc)
+        events_map = hazard_event_service.get_active_events_by_segment_map(now=effective_now)
         segments = []
         summary = {"Low": 0, "Medium": 0, "High": 0, "UNKNOWN": 0}
         op_summary = {"OPEN": 0, "CAUTION": 0, "RESTRICTED": 0, "CLOSED": 0, "UNKNOWN": 0}
         computed_at = None
 
         for r in rows:
-            tier = r["tier"]
-            summary[tier] = summary.get(tier, 0) + 1
-            computed_at = r["computed_at"]
             sid = r["segment_id"]
+            computed_at = r["computed_at"]
+            db_is_stale = bool(r["is_stale"])
+
+            # Read-time 24h staleness evaluation relative to effective_now
+            is_stale_read = db_is_stale
+            if not is_stale_read and computed_at:
+                try:
+                    comp_dt = datetime.fromisoformat(computed_at.replace("Z", "+00:00"))
+                    if (effective_now - comp_dt).total_seconds() > 24 * 3600:
+                        is_stale_read = True
+                except Exception:
+                    pass
+            if not is_stale_read and r["weather_window_end"]:
+                try:
+                    win_dt = datetime.strptime(r["weather_window_end"][:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    if settings.live_mode == "replay":
+                        target_dt = datetime.strptime(target_as_of[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                        if (target_dt - win_dt).total_seconds() > 24 * 3600:
+                            is_stale_read = True
+                    else:
+                        if (effective_now.date() - win_dt.date()).days > 1:
+                            is_stale_read = True
+                except Exception:
+                    pass
+
+            status = "STALE_DATA" if is_stale_read and r["status"] == "OK" else r["status"]
+            tier = "UNKNOWN" if is_stale_read else r["tier"]
+            score = None if is_stale_read else r["score"]
+
+            summary[tier] = summary.get(tier, 0) + 1
             seg_events = events_map.get(sid, [])
             op_status = hazard_event_service.derive_operational_status(
                 model_risk_tier=tier,
                 active_events=seg_events,
-                model_status=r["status"],
+                model_status=status,
             )
             op_summary[op_status] = op_summary.get(op_status, 0) + 1
 
             model_risk = {
-                "risk_score": r["score"],
+                "risk_score": score,
                 "risk_tier": tier,
-                "status": r["status"],
-                "is_stale": bool(r["is_stale"]),
+                "status": status,
+                "is_stale": is_stale_read,
             }
 
             segments.append({
                 "segment_id": sid,
-                "risk_score": r["score"],
+                "risk_score": score,
                 "risk_tier": tier,
-                "status": r["status"],
-                "is_stale": bool(r["is_stale"]),
+                "status": status,
+                "is_stale": is_stale_read,
                 "model_version": r["model_version"],
                 "checkpoint_sha256": r["checkpoint_sha256"],
                 "weather_window_end": r["weather_window_end"],
@@ -468,12 +543,26 @@ class LiveRiskService:
                 "model_risk": model_risk,
             })
 
+        model_version = (
+            rows[0]["model_version"]
+            if rows
+            else (
+                self._engine.model_version
+                if self._engine
+                else (
+                    self._checkpoint_sha256[:16]
+                    if self._checkpoint_sha256 != "CHECKPOINT_NOT_FOUND"
+                    else "UNKNOWN"
+                )
+            )
+        )
+
         return {
             "as_of": target_as_of,
             "computed_at": computed_at,
             "experimental": True,
             "disclaimer": "Live data - Experimental - not validated. Relative advisory index.",
-            "model_version": self._get_engine().model_version,
+            "model_version": model_version,
             "checkpoint_sha256": self._checkpoint_sha256,
             "summary": summary,
             "operational_summary": op_summary,

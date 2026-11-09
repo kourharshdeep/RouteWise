@@ -10,6 +10,7 @@ Honest Framing:
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import sqlite3
 import uuid
@@ -40,6 +41,20 @@ class HazardEventService:
 
     def __init__(self, storage: Optional[WeatherStorage] = None) -> None:
         self.storage = storage or weather_storage
+        self._initialized_dbs: set[Path] = set()
+        self._active_events_cache: Optional[List[Dict[str, Any]]] = None
+        self._cache_earliest_expires_at: Optional[str] = None
+
+    def invalidate_cache(self) -> None:
+        """Invalidates in-memory active hazard events cache."""
+        self._active_events_cache = None
+        self._cache_earliest_expires_at = None
+
+    def reset_db_init(self) -> None:
+        """Clears DB initialization tracking for tests."""
+        self._initialized_dbs.clear()
+        self._active_events_cache = None
+        self._cache_earliest_expires_at = None
 
     def _get_connection(self) -> sqlite3.Connection:
         self.storage.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,51 +66,62 @@ class HazardEventService:
 
     def init_db(self) -> None:
         """Initializes hazard_event and hazard_event_history tables."""
-        with self._get_connection() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS hazard_event (
-                    id TEXT PRIMARY KEY,
-                    segment_id TEXT NOT NULL,
-                    hazard_type TEXT NOT NULL,
-                    severity TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'active',
-                    origin TEXT NOT NULL,
-                    is_simulated INTEGER NOT NULL DEFAULT 0,
-                    source_report_id TEXT,
-                    starts_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL,
-                    created_by INTEGER,
-                    created_at TEXT NOT NULL
-                );
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_seg ON hazard_event(segment_id, status);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_status ON hazard_event(status, expires_at);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_sim ON hazard_event(is_simulated);")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_report ON hazard_event(source_report_id);")
+        db_path = self.storage.db_path
+        if db_path in self._initialized_dbs and db_path.is_file():
+            try:
+                with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hazard_event'").fetchone():
+                        return
+            except Exception:
+                pass
+            self._initialized_dbs.discard(db_path)
 
-            # Audit trail table for lifecycle actions (create, refresh, close, auto-expire)
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS hazard_event_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    event_id TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    note TEXT,
-                    actor_id INTEGER,
-                    timestamp TEXT NOT NULL,
-                    FOREIGN KEY(event_id) REFERENCES hazard_event(id) ON DELETE CASCADE
-                );
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_history_event ON hazard_event_history(event_id);")
-            conn.commit()
+        with contextlib.closing(self._get_connection()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS hazard_event (
+                        id TEXT PRIMARY KEY,
+                        segment_id TEXT NOT NULL,
+                        hazard_type TEXT NOT NULL,
+                        severity TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        origin TEXT NOT NULL,
+                        is_simulated INTEGER NOT NULL DEFAULT 0,
+                        source_report_id TEXT,
+                        starts_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        created_by INTEGER,
+                        created_at TEXT NOT NULL
+                    );
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_seg ON hazard_event(segment_id, status);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_status ON hazard_event(status, expires_at);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_sim ON hazard_event(is_simulated);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_report ON hazard_event(source_report_id);")
 
-    def expire_active_events(self) -> int:
+                # Audit trail table for lifecycle actions (create, refresh, close, auto-expire)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS hazard_event_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        event_id TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        note TEXT,
+                        actor_id INTEGER,
+                        timestamp TEXT NOT NULL,
+                        FOREIGN KEY(event_id) REFERENCES hazard_event(id) ON DELETE CASCADE
+                    );
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_history_event ON hazard_event_history(event_id);")
+        self._initialized_dbs.add(db_path)
+
+    def expire_active_events(self, now: Optional[datetime] = None) -> int:
         """Auto-expires events past their expires_at deadline with an audit trail entry."""
         self.init_db()
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = (now or datetime.now(timezone.utc)).isoformat()
         with self._get_connection() as conn:
             expired_rows = conn.execute(
                 "SELECT id FROM hazard_event WHERE status = 'active' AND expires_at < ?",
@@ -119,6 +145,8 @@ class HazardEventService:
                     (eid, now_iso),
                 )
             conn.commit()
+            if expired_ids:
+                self.invalidate_cache()
             logger.info("Auto-expired %d overdue hazard events", len(expired_ids))
             return len(expired_ids)
 
@@ -232,10 +260,12 @@ class HazardEventService:
 
         return None
 
-    def _broadcast_event_change(self, action: str, event_id: Optional[str] = None) -> None:
+    def _broadcast_event_change(self, action: str, event_id: Optional[str] = None, now: Optional[datetime] = None) -> None:
         """Dispatches an SSE event notification and updated live risk payload."""
+        self.invalidate_cache()
         try:
             from src.services.live_broadcast_service import live_broadcaster
+            effective_now = now or datetime.now(timezone.utc)
             live_broadcaster.broadcast_sync("event_update", {
                 "action": action,
                 "event_id": event_id,
@@ -243,10 +273,10 @@ class HazardEventService:
             live_broadcaster.broadcast_sync("route_update", {
                 "reason": f"hazard_{action}",
                 "event_id": event_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": effective_now.isoformat(),
             })
             from src.services.live_risk_service import live_risk_service
-            live_broadcaster.broadcast_sync("risk_update", live_risk_service.get_latest_live_risk())
+            live_broadcaster.broadcast_sync("risk_update", live_risk_service.get_latest_live_risk(eval_time=effective_now))
             live_broadcaster.broadcast_sync("status", live_risk_service.get_live_status())
         except Exception as e:
             logger.debug("Failed to dispatch SSE broadcast for hazard event: %s", e)
@@ -258,6 +288,7 @@ class HazardEventService:
         severity: Optional[str] = None,
         duration_hours: Optional[int] = None,
         user_id: Optional[int] = None,
+        now: Optional[datetime] = None,
     ) -> Dict[str, Any]:
         """Creates an operator-simulated hazard event (Admin only)."""
         self.init_db()
@@ -272,7 +303,7 @@ class HazardEventService:
         eff_severity = severity or preset_cfg["severity"]
         eff_duration = duration_hours if (duration_hours and duration_hours > 0) else preset_cfg["default_duration_hours"]
 
-        now_dt = datetime.now(timezone.utc)
+        now_dt = now or datetime.now(timezone.utc)
         now_iso = now_dt.isoformat()
         expires_iso = (now_dt + timedelta(hours=eff_duration)).isoformat()
         event_id = str(uuid.uuid4())
@@ -328,7 +359,7 @@ class HazardEventService:
             "created_by": user_id,
             "created_at": now_iso,
         }
-        self._broadcast_event_change("simulate", event_id)
+        self._broadcast_event_change("simulate", event_id, now=now_dt)
         return res
 
     def clear_all_simulated_events(self, user_id: Optional[int] = None) -> int:
@@ -356,9 +387,18 @@ class HazardEventService:
                 self._broadcast_event_change("clear_simulated")
             return len(sim_rows)
 
-    def get_active_events(self, segment_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_active_events(self, segment_id: Optional[str] = None, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
         """Returns active hazard events, auto-expiring overdue items first."""
-        self.expire_active_events()
+        effective_now = now or datetime.now(timezone.utc)
+        now_iso = effective_now.isoformat()
+
+        if segment_id is None and self._active_events_cache is not None:
+            if self._cache_earliest_expires_at and now_iso >= self._cache_earliest_expires_at:
+                self.expire_active_events(now=effective_now)
+            else:
+                return self._active_events_cache
+
+        self.expire_active_events(now=effective_now)
         with self._get_connection() as conn:
             if segment_id:
                 rows = conn.execute(
@@ -395,11 +435,14 @@ class HazardEventService:
                 "created_by": r["created_by"],
                 "created_at": r["created_at"],
             })
+        if segment_id is None:
+            self._active_events_cache = events
+            self._cache_earliest_expires_at = min((ev["expires_at"] for ev in events), default=None)
         return events
 
-    def get_active_events_by_segment_map(self) -> Dict[str, List[Dict[str, Any]]]:
+    def get_active_events_by_segment_map(self, now: Optional[datetime] = None) -> Dict[str, List[Dict[str, Any]]]:
         """Builds a map of segment_id -> active_events."""
-        all_active = self.get_active_events()
+        all_active = self.get_active_events(now=now)
         res: Dict[str, List[Dict[str, Any]]] = {}
         for ev in all_active:
             sid = ev["segment_id"]
