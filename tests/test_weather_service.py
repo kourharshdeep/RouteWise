@@ -9,6 +9,7 @@ Verifies:
 """
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from pathlib import Path
 import pandas as pd
@@ -69,7 +70,7 @@ def test_weather_storage_idempotence_and_no_duplicates(tmp_path: Path):
     storage.init_db()
 
     # Check table and index creation in SQLite
-    with sqlite3.connect(test_db) as conn:
+    with contextlib.closing(sqlite3.connect(test_db)) as conn:
         tables = [
             r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         ]
@@ -265,56 +266,56 @@ def test_weather_observation_migration_on_copy_of_live_db(tmp_path: Path):
     legacy_db_path = tmp_path / "legacy_weather.db"
 
     # 1. Build a temp DB with the OLD weather_observation schema (dynamic columns REAL NOT NULL)
-    with sqlite3.connect(legacy_db_path) as conn:
-        conn.execute(
-            """
-            CREATE TABLE weather_observation (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                segment_id TEXT NOT NULL,
-                obs_date TEXT NOT NULL,
-                precip_mm REAL NOT NULL,
-                snowfall_mm_we REAL NOT NULL,
-                temp_mean_c REAL NOT NULL,
-                temp_min_c REAL NOT NULL,
-                snow_depth_m REAL NOT NULL,
-                precip_3d_mm REAL NOT NULL,
-                precip_7d_mm REAL NOT NULL,
-                source TEXT NOT NULL,
-                fetched_at TEXT NOT NULL,
-                quality_flag TEXT NOT NULL DEFAULT 'OK',
-                UNIQUE(segment_id, obs_date, source)
-            );
-            """
-        )
-        # Seed 5 rows with NOT NULL values
-        seed_records = [
-            (
-                f"seg_{i}",
-                f"2024-07-0{i}",
-                float(i),
-                0.0,
-                20.0,
-                15.0,
-                0.0,
-                float(i),
-                float(i),
-                "replay",
-                "2024-07-01T00:00:00Z",
-                "OK",
+    with contextlib.closing(sqlite3.connect(legacy_db_path)) as conn:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE weather_observation (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    segment_id TEXT NOT NULL,
+                    obs_date TEXT NOT NULL,
+                    precip_mm REAL NOT NULL,
+                    snowfall_mm_we REAL NOT NULL,
+                    temp_mean_c REAL NOT NULL,
+                    temp_min_c REAL NOT NULL,
+                    snow_depth_m REAL NOT NULL,
+                    precip_3d_mm REAL NOT NULL,
+                    precip_7d_mm REAL NOT NULL,
+                    source TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    quality_flag TEXT NOT NULL DEFAULT 'OK',
+                    UNIQUE(segment_id, obs_date, source)
+                );
+                """
             )
-            for i in range(1, 6)
-        ]
-        conn.executemany(
-            """
-            INSERT INTO weather_observation (
-                segment_id, obs_date, precip_mm, snowfall_mm_we, temp_mean_c,
-                temp_min_c, snow_depth_m, precip_3d_mm, precip_7d_mm,
-                source, fetched_at, quality_flag
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            seed_records,
-        )
-        conn.commit()
+            # Seed 5 rows with NOT NULL values
+            seed_records = [
+                (
+                    f"seg_{i}",
+                    f"2024-07-0{i}",
+                    float(i),
+                    0.0,
+                    20.0,
+                    15.0,
+                    0.0,
+                    float(i),
+                    float(i),
+                    "replay",
+                    "2024-07-01T00:00:00Z",
+                    "OK",
+                )
+                for i in range(1, 6)
+            ]
+            conn.executemany(
+                """
+                INSERT INTO weather_observation (
+                    segment_id, obs_date, precip_mm, snowfall_mm_we, temp_mean_c,
+                    temp_min_c, snow_depth_m, precip_3d_mm, precip_7d_mm,
+                    source, fetched_at, quality_flag
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                seed_records,
+            )
 
         cur = conn.execute("SELECT count(*) FROM weather_observation")
         count_before = cur.fetchone()[0]
@@ -324,8 +325,8 @@ def test_weather_observation_migration_on_copy_of_live_db(tmp_path: Path):
     storage = WeatherStorage(db_path=legacy_db_path)
     storage.init_db()
 
-    # 3. Assert row count after migration is unchanged
-    with sqlite3.connect(legacy_db_path) as conn:
+    # 3. Assert count == 5 after the first init_db() and columns are nullable
+    with contextlib.closing(sqlite3.connect(legacy_db_path)) as conn:
         conn.row_factory = sqlite3.Row
         count_after = conn.execute("SELECT count(*) FROM weather_observation").fetchone()[0]
         assert count_after == 5
@@ -340,13 +341,7 @@ def test_weather_observation_migration_on_copy_of_live_db(tmp_path: Path):
         for f in feature_cols:
             assert col_map[f]["notnull"] == 0, f"Column {f} should be nullable"
 
-    # 4. Idempotent second run
-    storage.init_db()
-    with sqlite3.connect(legacy_db_path) as conn:
-        count_second = conn.execute("SELECT count(*) FROM weather_observation").fetchone()[0]
-        assert count_second == 5
-
-    # 5. Verify insertion of NULL values succeeds without IntegrityError
+    # 4. Insert NULL-row right after first migration and assert count == 6
     test_null_row = pd.DataFrame([{
         "segment_id": "migration_test_seg",
         "obs_date": "2099-01-01",
@@ -362,6 +357,28 @@ def test_weather_observation_migration_on_copy_of_live_db(tmp_path: Path):
         "quality_flag": "MISSING_DATA",
     }])
     storage.upsert_observations(test_null_row)
+
+    with contextlib.closing(sqlite3.connect(legacy_db_path)) as conn:
+        count_after_null = conn.execute("SELECT count(*) FROM weather_observation").fetchone()[0]
+        assert count_after_null == 6
+
+    # 5. Run init_db() again and assert count == 6 still
+    storage.init_db()
+
+    with contextlib.closing(sqlite3.connect(legacy_db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        count_second = conn.execute("SELECT count(*) FROM weather_observation").fetchone()[0]
+        assert count_second == 6
+
+        # Assert the NULL row still has precip_mm IS NULL and quality_flag == 'MISSING_DATA'
+        null_row = conn.execute(
+            "SELECT precip_mm, quality_flag FROM weather_observation WHERE segment_id = 'migration_test_seg' AND obs_date = '2099-01-01'"
+        ).fetchone()
+        assert null_row is not None
+        assert null_row["precip_mm"] is None
+        assert null_row["quality_flag"] == "MISSING_DATA"
+
+    # Also verify through WeatherStorage.get_observations
     inserted = storage.get_observations(start_date="2099-01-01", end_date="2099-01-01")
     assert len(inserted) == 1
     assert pd.isna(inserted.iloc[0]["precip_mm"])
