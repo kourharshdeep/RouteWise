@@ -366,7 +366,6 @@ def test_weather_observation_migration_on_copy_of_live_db(tmp_path: Path):
     assert len(inserted) == 1
     assert pd.isna(inserted.iloc[0]["precip_mm"])
     assert inserted.iloc[0]["quality_flag"] == "MISSING_DATA"
-    assert inserted.iloc[0]["quality_flag"] == "MISSING_DATA"
 
 
 
