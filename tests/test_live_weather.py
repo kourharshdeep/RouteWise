@@ -11,6 +11,7 @@ All tests use a mock/fake fetcher with zero network calls, verifying:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone, timedelta
 import urllib.error
 from pathlib import Path
 from typing import Dict, List
@@ -235,3 +236,320 @@ def test_weather_scheduler_lifecycle(tmp_path: Path):
         assert broken_status["consecutive_failures"] == 1
 
     asyncio.run(_run())
+
+
+def test_null_weather_fields_preserved_as_nan_with_quality_flag(tmp_path: Path):
+    """Mock Open-Meteo response with null precipitation_sum: stored as NaN/NULL with quality_flag='MISSING_DATA'."""
+    mock_data = {
+        "daily": {
+            "time": ["2026-11-01"],
+            "precipitation_sum": [None],  # Missing rainfall
+            "snowfall_sum": [0.0],
+            "temperature_2m_mean": [14.0],
+            "temperature_2m_min": [8.0],
+        },
+        "hourly": {
+            "time": ["2026-11-01T00:00Z"],
+            "snow_depth": [0.0],
+        },
+    }
+    provider = OpenMeteoProvider(fetcher=lambda url, timeout: mock_data)
+    df = provider.fetch(start_date="2026-11-01", end_date="2026-11-01")
+
+    assert not df.empty
+    row = df.iloc[0]
+    # Rainfall must NOT be silently replaced with 0.0
+    assert pd.isna(row["precip_mm"])
+    assert row["precip_mm"] != 0.0
+    assert row["quality_flag"] == "MISSING_DATA"
+
+    # Store in runtime database and verify SQL NULL / pd.isna
+    test_db = tmp_path / "test_missing_weather.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.upsert_observations(df)
+
+    stored_df = storage.get_observations(start_date="2026-11-01", end_date="2026-11-01")
+    stored_row = stored_df.iloc[0]
+    assert pd.isna(stored_row["precip_mm"])
+    assert stored_row["quality_flag"] == "MISSING_DATA"
+
+
+def test_genuine_zero_precipitation_not_flagged(tmp_path: Path):
+    """Ingesting genuine 0.0 mm precipitation: stored as 0.0 (not NaN), quality_flag is normal."""
+    mock_data = {
+        "daily": {
+            "time": ["2026-11-01"],
+            "precipitation_sum": [0.0],  # Genuine 0.0 dry weather
+            "snowfall_sum": [0.0],
+            "temperature_2m_mean": [14.0],
+            "temperature_2m_min": [8.0],
+        },
+        "hourly": {
+            "time": ["2026-11-01T00:00Z"],
+            "snow_depth": [0.0],
+        },
+    }
+    provider = OpenMeteoProvider(fetcher=lambda url, timeout: mock_data)
+    df = provider.fetch(start_date="2026-11-01", end_date="2026-11-01")
+
+    assert not df.empty
+    row = df.iloc[0]
+    assert row["precip_mm"] == 0.0
+    assert not pd.isna(row["precip_mm"])
+    assert row["quality_flag"] == "EXPERIMENTAL_LIVE"
+
+    test_db = tmp_path / "test_zero_weather.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.upsert_observations(df)
+
+    stored_df = storage.get_observations(start_date="2026-11-01", end_date="2026-11-01")
+    stored_row = stored_df.iloc[0]
+    assert stored_row["precip_mm"] == 0.0
+    assert stored_row["quality_flag"] == "EXPERIMENTAL_LIVE"
+
+
+def test_missing_weather_in_live_risk_evaluates_unknown(tmp_path: Path):
+    """Segments with missing weather evaluate to MISSING_DATA, UNKNOWN tier, None score without contaminating others."""
+    from src.services.live_risk_service import LiveRiskService
+    from src.services.weather.replay import ReplayProvider
+
+    test_db = tmp_path / "test_risk_missing.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.init_db()
+
+    # Seed 7 days of complete valid weather from replay
+    replay = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    full_7d = replay.fetch(start_date="2024-07-09", end_date="2024-07-15")
+    # Set source to open-meteo so LiveRiskService picks it up in live mode
+    full_7d["source"] = "open-meteo"
+    storage.upsert_observations(full_7d)
+
+    # Pick segment 0, an adjacent neighbor, and a distant segment
+    service = LiveRiskService(storage=storage)
+    engine = service._get_engine()
+    all_segs = engine.segment_order
+    corrupted_seg = all_segs[0]
+    neighbor_indices = [j for j, v in enumerate(engine.A_hat[0]) if v > 0 and j != 0]
+    neighbor_seg = engine.segment_order[neighbor_indices[0]]
+    distant_indices = [j for j, v in enumerate(engine.A_hat[0]) if v == 0 and j != 0]
+    distant_seg = engine.segment_order[distant_indices[0]]
+
+    # Inject missing rainfall and MISSING_DATA quality_flag for corrupted_seg on 2024-07-15
+    with storage._get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE weather_observation
+            SET precip_mm = NULL, quality_flag = 'MISSING_DATA'
+            WHERE segment_id = ? AND obs_date = '2024-07-15' AND source = 'open-meteo'
+            """,
+            (corrupted_seg,),
+        )
+        conn.commit()
+
+    service = LiveRiskService(storage=storage)
+    eval_time = pd.to_datetime("2024-07-15 12:00:00+00:00").to_pydatetime()
+    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time)
+
+    assert len(predictions) == 151
+    pred_map = {p["segment_id"]: p for p in predictions}
+
+    # Corrupted segment MUST be MISSING_DATA, UNKNOWN tier, None score (never Low!)
+    p_corrupt = pred_map[corrupted_seg]
+    assert p_corrupt["status"] == "MISSING_DATA"
+    assert p_corrupt["risk_tier"] == "UNKNOWN"
+    assert p_corrupt["risk_score"] is None
+
+    # Adjacent neighbor segment MUST be NEIGHBOUR_DATA_MISSING, UNKNOWN tier, None score
+    p_neighbor = pred_map[neighbor_seg]
+    assert p_neighbor["status"] == "NEIGHBOUR_DATA_MISSING"
+    assert p_neighbor["risk_tier"] == "UNKNOWN"
+    assert p_neighbor["risk_score"] is None
+
+    # Distant clean segment must NOT be contaminated: valid score, tier in Low/Medium/High, status OK
+    p_distant = pred_map[distant_seg]
+    assert p_distant["status"] == "OK"
+    assert p_distant["risk_tier"] in ("Low", "Medium", "High")
+    assert p_distant["risk_score"] is not None
+    assert 0.0 <= p_distant["risk_score"] <= 1.0
+
+    # Also verify stored live_risk table rows
+    with storage._get_connection() as conn:
+        corrupt_row = conn.execute(
+            "SELECT score, tier, status FROM live_risk WHERE segment_id = ? AND as_of = '2024-07-15'",
+            (corrupted_seg,),
+        ).fetchone()
+        assert corrupt_row["status"] == "MISSING_DATA"
+        assert corrupt_row["tier"] == "UNKNOWN"
+        assert corrupt_row["score"] is None
+
+        neighbor_row = conn.execute(
+            "SELECT score, tier, status FROM live_risk WHERE segment_id = ? AND as_of = '2024-07-15'",
+            (neighbor_seg,),
+        ).fetchone()
+        assert neighbor_row["status"] == "NEIGHBOUR_DATA_MISSING"
+        assert neighbor_row["tier"] == "UNKNOWN"
+        assert neighbor_row["score"] is None
+
+        distant_row = conn.execute(
+            "SELECT score, tier, status FROM live_risk WHERE segment_id = ? AND as_of = '2024-07-15'",
+            (distant_seg,),
+        ).fetchone()
+        assert distant_row["status"] == "OK"
+        assert distant_row["tier"] in ("Low", "Medium", "High")
+        assert distant_row["score"] is not None
+
+
+def test_missing_cluster_flags_cluster_and_neighbors_as_unknown(tmp_path: Path):
+    """When a cluster (<=25% of corridor) has missing data, all cluster segments and adjacent neighbors are UNKNOWN."""
+    from src.services.live_risk_service import LiveRiskService
+    from src.services.weather.replay import ReplayProvider
+
+    test_db = tmp_path / "test_cluster_missing.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.init_db()
+
+    # Seed 7 days of complete valid weather
+    replay = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    full_7d = replay.fetch(start_date="2024-07-09", end_date="2024-07-15")
+    full_7d["source"] = "open-meteo"
+    storage.upsert_observations(full_7d)
+
+    # Pick cluster 4 (cell_4_33.5_75.2 has 14 segments, 14/151 = 9.3% <= 25%)
+    clusters = OpenMeteoProvider().get_clusters()
+    target_cluster = next(c for c in clusters if len(c.segment_ids) == 14)
+    cluster_segs = set(target_cluster.segment_ids)
+
+    # Corrupt all segments in this cluster on 2024-07-15
+    with storage._get_connection() as conn:
+        for seg in cluster_segs:
+            conn.execute(
+                """
+                UPDATE weather_observation
+                SET precip_mm = NULL, quality_flag = 'MISSING_DATA'
+                WHERE segment_id = ? AND obs_date = '2024-07-15' AND source = 'open-meteo'
+                """,
+                (seg,),
+            )
+        conn.commit()
+
+    service = LiveRiskService(storage=storage)
+    eval_time = pd.to_datetime("2024-07-15 12:00:00+00:00").to_pydatetime()
+    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time)
+
+    assert len(predictions) == 151
+    pred_map = {p["segment_id"]: p for p in predictions}
+
+    # All cluster segments must be MISSING_DATA and UNKNOWN
+    for seg in cluster_segs:
+        p = pred_map[seg]
+        assert p["status"] == "MISSING_DATA"
+        assert p["risk_tier"] == "UNKNOWN"
+        assert p["risk_score"] is None
+
+    # Distant cluster 0 segments (in south) must remain OK
+    c0 = clusters[0]
+    c0_segs_distant = [s for s in c0.segment_ids if pred_map[s]["status"] == "OK"]
+    assert len(c0_segs_distant) > 0
+
+
+def test_missing_above_threshold_flags_all_segments_unknown(tmp_path: Path):
+    """When missing segments exceed 25% threshold, ALL 151 segments evaluate to MISSING_DATA / UNKNOWN."""
+    from src.services.live_risk_service import LiveRiskService
+    from src.services.weather.replay import ReplayProvider
+
+    test_db = tmp_path / "test_above_threshold.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.init_db()
+
+    # Seed 7 days of complete valid weather
+    replay = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    full_7d = replay.fetch(start_date="2024-07-09", end_date="2024-07-15")
+    full_7d["source"] = "open-meteo"
+    storage.upsert_observations(full_7d)
+
+    # Pick cluster 3 (cell_3_33.4_75.2 has 58 segments: 58/151 = 38.4% > 25% threshold)
+    clusters = OpenMeteoProvider().get_clusters()
+    target_cluster = next(c for c in clusters if len(c.segment_ids) == 58)
+    cluster_segs = set(target_cluster.segment_ids)
+
+    # Corrupt all 58 segments on 2024-07-15
+    with storage._get_connection() as conn:
+        for seg in cluster_segs:
+            conn.execute(
+                """
+                UPDATE weather_observation
+                SET precip_mm = NULL, quality_flag = 'MISSING_DATA'
+                WHERE segment_id = ? AND obs_date = '2024-07-15' AND source = 'open-meteo'
+                """,
+                (seg,),
+            )
+        conn.commit()
+
+    service = LiveRiskService(storage=storage)
+    eval_time = pd.to_datetime("2024-07-15 12:00:00+00:00").to_pydatetime()
+    predictions = service.compute_live_risk(as_of="2024-07-15", eval_time=eval_time)
+
+    assert len(predictions) == 151
+    # Above 25% threshold: ALL 151 segments must be MISSING_DATA and UNKNOWN tier
+    for p in predictions:
+        assert p["status"] == "MISSING_DATA"
+        assert p["risk_tier"] == "UNKNOWN"
+        assert p["risk_score"] is None
+
+
+def test_scheduler_cold_start_backfill_13_days(tmp_path: Path):
+    """Empty DB cold start: first scheduler cycle backfills 13 days; 0 segments are UNKNOWN."""
+    import asyncio
+    from src.services.weather.scheduler import WeatherScheduler
+    from src.services.weather.replay import ReplayProvider
+
+    test_db = tmp_path / "cold_start_test.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.init_db()
+    assert storage.count_observations() == 0  # Completely empty DB
+
+    today = datetime.now(timezone.utc).date()
+    # Mock provider returning 14 days of realistic weather
+    start_14d = today - timedelta(days=13)
+    replay = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    raw_replay = replay.fetch(start_date="2024-07-02", end_date="2024-07-15")
+
+    # Map dates to recent 14-day window
+    date_map = {}
+    for idx, d_str in enumerate(sorted(raw_replay["obs_date"].unique())):
+        target_d = (start_14d + timedelta(days=idx)).strftime("%Y-%m-%d")
+        date_map[d_str] = target_d
+
+    mapped_df = raw_replay.copy()
+    mapped_df["obs_date"] = mapped_df["obs_date"].map(date_map)
+    mapped_df["source"] = "open-meteo"
+    mapped_df["quality_flag"] = "EXPERIMENTAL_LIVE"
+
+    class ColdStartProvider:
+        provider_name = "open-meteo"
+        def fetch(self, start_date, end_date=None, segments=None):
+            return mapped_df
+
+    scheduler = WeatherScheduler(storage=storage, provider=ColdStartProvider())
+    scheduler.mode = "live"
+
+    async def _run():
+        upserted = await scheduler.run_once()
+        assert upserted == 151 * 14  # 151 segments * 14 days = 2114 rows
+
+        # Inspect live_risk table
+        with storage._get_connection() as conn:
+            rows = conn.execute("SELECT segment_id, score, tier, status FROM live_risk").fetchall()
+            assert len(rows) == 151
+
+            unknown_count = sum(1 for r in rows if r["tier"] == "UNKNOWN")
+            ok_count = sum(1 for r in rows if r["status"] == "OK")
+
+            # ZERO segments are UNKNOWN because backfilling 13 days provides a complete
+            # 7-day lookback window without any PARTIAL_WINDOW
+            assert unknown_count == 0
+            assert ok_count == 151
+
+    asyncio.run(_run())
+
+

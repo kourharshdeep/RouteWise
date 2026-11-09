@@ -17,7 +17,10 @@ from fastapi.testclient import TestClient
 
 from src.api.app import app
 from src.services.live_broadcast_service import live_broadcaster, LiveBroadcaster
-from src.services.live_risk_service import live_risk_service
+from src.services.live_risk_service import LiveRiskService
+from src.services.weather.replay import ReplayProvider
+from src.services.weather.storage import WeatherStorage
+from pathlib import Path
 
 
 def test_broadcaster_lifecycle_and_delivery():
@@ -89,3 +92,64 @@ def test_sse_heartbeat_emission():
     assert response.status_code == 200
     assert "event: heartbeat" in response.text
     assert '"status": "alive"' in response.text
+
+
+def test_compute_live_risk_emits_valid_sse_event(tmp_path: Path):
+    """Regression test for Fix 1: compute_live_risk must emit a valid risk_update frame to SSE subscribers."""
+    test_db = tmp_path / "test_live_broadcast.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.init_db()
+    service = LiveRiskService(storage=storage)
+    service.init_db()
+
+    provider = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    df_7days = provider.fetch(start_date="2024-07-01", end_date="2024-07-07")
+    storage.upsert_observations(df_7days)
+
+    q = live_broadcaster.subscribe()
+    try:
+        while not q.empty():
+            q.get_nowait()
+
+        records = service.compute_live_risk(as_of="2024-07-07")
+        assert len(records) == 151
+
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+
+        risk_updates = [e for e in events if e.get("event") == "risk_update"]
+        assert len(risk_updates) == 1, f"Expected 1 risk_update event, received {len(risk_updates)}"
+
+        payload = risk_updates[0]["data"]
+        assert payload.get("as_of") == "2024-07-07"
+        assert payload.get("computed_at") is not None
+        assert payload.get("segments_count") == len(records)
+    finally:
+        live_broadcaster.unsubscribe(q)
+
+
+def test_failing_broadcaster_does_not_break_compute_live_risk(tmp_path: Path, monkeypatch):
+    """Verifies that if broadcaster raises an exception, live_risk rows are still committed successfully."""
+    test_db = tmp_path / "test_broadcaster_fail.db"
+    storage = WeatherStorage(db_path=test_db)
+    storage.init_db()
+    service = LiveRiskService(storage=storage)
+    service.init_db()
+
+    provider = ReplayProvider(csv_path="data/weather_daily_by_segment.csv")
+    df_7days = provider.fetch(start_date="2024-07-01", end_date="2024-07-07")
+    storage.upsert_observations(df_7days)
+
+    def mock_broadcast_fail(*args, **kwargs):
+        raise RuntimeError("Simulated network/queue transport disaster")
+
+    monkeypatch.setattr(live_broadcaster, "broadcast_sync", mock_broadcast_fail)
+
+    records = service.compute_live_risk(as_of="2024-07-07")
+    assert len(records) == 151
+
+    with service._get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM live_risk WHERE as_of = '2024-07-07'").fetchone()[0]
+    assert count == 151
+

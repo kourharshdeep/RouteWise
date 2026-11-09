@@ -48,12 +48,14 @@ class OpenMeteoProvider(WeatherProvider):
         max_retries: int = 3,
         backoff_factor: float = 0.5,
         fetcher: Optional[Callable[[str, float], dict]] = None,
+        storage: Optional[Any] = None,
     ) -> None:
         self.base_url = base_url
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
         self._fetcher = fetcher or self._default_http_get
+        self.storage = storage
         self._clusters: Optional[List[GridCluster]] = None
 
     @property
@@ -162,15 +164,28 @@ class OpenMeteoProvider(WeatherProvider):
 
         for idx, obs_date in enumerate(times):
             # Units conversion & Hydrological Assumptions:
-            precip_mm = float(precip_sums[idx]) if idx < len(precip_sums) and precip_sums[idx] is not None else 0.0
-            
-            # ASSUMPTION: 10:1 Snow Water Equivalent ratio. 1 cm snow depth = 1 mm water equivalent.
-            snowfall_cm = float(snowfall_sums[idx]) if idx < len(snowfall_sums) and snowfall_sums[idx] is not None else 0.0
-            snowfall_mm_we = round(snowfall_cm * 1.0, 4)
+            # Preserve None as NaN (do NOT silently replace missing weather with 0.0)
+            precip_raw = precip_sums[idx] if idx < len(precip_sums) else None
+            precip_mm = float(precip_raw) if (precip_raw is not None and not pd.isna(precip_raw)) else float("nan")
 
-            temp_mean_c = float(temp_means[idx]) if idx < len(temp_means) and temp_means[idx] is not None else 0.0
-            temp_min_c = float(temp_mins[idx]) if idx < len(temp_mins) and temp_mins[idx] is not None else 0.0
+            # ASSUMPTION: 10:1 Snow Water Equivalent ratio. 1 cm snow depth = 1 mm water equivalent.
+            snowfall_raw = snowfall_sums[idx] if idx < len(snowfall_sums) else None
+            snowfall_cm = float(snowfall_raw) if (snowfall_raw is not None and not pd.isna(snowfall_raw)) else float("nan")
+            snowfall_mm_we = round(snowfall_cm * 1.0, 4) if not pd.isna(snowfall_cm) else float("nan")
+
+            temp_mean_raw = temp_means[idx] if idx < len(temp_means) else None
+            temp_mean_c = float(temp_mean_raw) if (temp_mean_raw is not None and not pd.isna(temp_mean_raw)) else float("nan")
+
+            temp_min_raw = temp_mins[idx] if idx < len(temp_mins) else None
+            temp_min_c = float(temp_min_raw) if (temp_min_raw is not None and not pd.isna(temp_min_raw)) else float("nan")
+
             snow_depth_m = daily_snow_depth_map.get(obs_date, 0.0)
+
+            # Check if any required feature is missing
+            has_missing = any(
+                pd.isna(v) for v in (precip_mm, snowfall_mm_we, temp_mean_c, temp_min_c, snow_depth_m)
+            )
+            quality_flag = "MISSING_DATA" if has_missing else "EXPERIMENTAL_LIVE"
 
             # Fan out cluster observations to all segments assigned to this cluster
             for seg_id in cluster.segment_ids:
@@ -186,7 +201,7 @@ class OpenMeteoProvider(WeatherProvider):
                     "precip_7d_mm": 0.0,
                     "source": "open-meteo",
                     "fetched_at": now_iso,
-                    "quality_flag": "EXPERIMENTAL_LIVE",
+                    "quality_flag": quality_flag,
                 })
 
         return pd.DataFrame(rows)
@@ -232,12 +247,29 @@ class OpenMeteoProvider(WeatherProvider):
         if segment_filter:
             combined_df = combined_df[combined_df["segment_id"].isin(segment_filter)].copy()
 
+        # Database-aware rolling history retrieval
+        history_df = None
+        if self.storage is not None:
+            try:
+                start_dt = pd.to_datetime(start_str).date()
+                history_start = (start_dt - timedelta(days=6)).isoformat()
+                history_end = (start_dt - timedelta(days=1)).isoformat()
+                history_df = self.storage.get_observations(
+                    start_date=history_start,
+                    end_date=history_end,
+                    source=self.provider_name,
+                )
+            except Exception as e:
+                logger.warning("Could not retrieve weather history for rolling calculation: %s", e)
+
         # Compute rolling 3-day and 7-day precipitation sums matching week2b_process_weather.py
         final_df = compute_rolling_precipitation(
             combined_df,
+            history_df=history_df,
             segment_col="segment_id",
             date_col="obs_date",
             precip_col="precip_mm",
+            flag_incomplete=(self.storage is not None),
         )
 
         return final_df

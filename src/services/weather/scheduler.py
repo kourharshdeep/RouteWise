@@ -49,7 +49,7 @@ class WeatherScheduler:
         if self.provider is not None:
             return self.provider
         if self.mode == "live":
-            return OpenMeteoProvider()
+            return OpenMeteoProvider(storage=self.storage)
         elif self.mode == "replay":
             return ReplayProvider()
         else:
@@ -67,8 +67,9 @@ class WeatherScheduler:
 
             today = datetime.now(timezone.utc).date()
             if self.mode == "live":
-                # For live mode, fetch past 7 days through today to keep rolling 7d windows populated
-                start_date = today - timedelta(days=7)
+                # For live mode, backfill at least 13 days (14 days total) to ensure all days in the
+                # 7-day evaluation window have complete 7-day trailing lookback history without PARTIAL_WINDOW
+                start_date = today - timedelta(days=13)
                 end_date = today
             else:
                 # For replay mode, fetch a known demonstration week or latest available
@@ -91,8 +92,9 @@ class WeatherScheduler:
 
             # Recompute live risk after successful weather fetch
             try:
-                from src.services.live_risk_service import live_risk_service
-                await loop.run_in_executor(None, live_risk_service.compute_live_risk)
+                from src.services.live_risk_service import LiveRiskService, live_risk_service
+                risk_svc = LiveRiskService(storage=self.storage) if self.storage is not None else live_risk_service
+                await loop.run_in_executor(None, risk_svc.compute_live_risk)
                 logger.info("Live risk recomputed successfully following weather fetch.")
             except Exception as e:
                 logger.error("Error recomputing live risk post-fetch: %s", e)

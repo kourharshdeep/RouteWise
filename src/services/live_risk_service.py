@@ -34,6 +34,9 @@ EXPECTED_CHECKPOINT_SHA256 = "68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F
 class LiveRiskService:
     """Evaluates live disruption risk using the existing PyTorch ST-GNN inference engine."""
 
+    # Missing-data threshold matching src/models/inference.py (0.25 = 25%)
+    MISSING_DATA_THRESHOLD: float = 0.25
+
     def __init__(
         self,
         storage: Optional[WeatherStorage] = None,
@@ -157,7 +160,39 @@ class LiveRiskService:
         if "date" not in obs_df.columns:
             obs_df["date"] = obs_df["obs_date"] if "obs_date" in obs_df.columns else []
 
-        # 3. Call existing inference engine
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # 3. Detect segments with missing, incomplete, or flagged observations in 7-day lookback window
+        missing_segment_ids = set()
+        required_dates = set(pd.date_range(start=start_date, end=target_date, freq="D").strftime("%Y-%m-%d"))
+
+        if obs_df.empty:
+            missing_segment_ids = set(engine.segment_order)
+        else:
+            for seg in engine.segment_order:
+                seg_sub = obs_df[obs_df["segment_id"] == seg]
+                seg_dates = set(seg_sub["obs_date"].dropna().unique())
+                if not required_dates.issubset(seg_dates):
+                    missing_segment_ids.add(seg)
+                    continue
+
+                has_missing_feature = False
+                for _, row in seg_sub.iterrows():
+                    q_flag = str(row.get("quality_flag", "OK"))
+                    if q_flag in ("MISSING_DATA", "PARTIAL_WINDOW"):
+                        has_missing_feature = True
+                        break
+                    for feat in EXPECTED_DYNAMIC_FEATURES:
+                        val = row.get(feat)
+                        if val is None or pd.isna(val):
+                            has_missing_feature = True
+                            break
+                    if has_missing_feature:
+                        break
+
+                if has_missing_feature:
+                    missing_segment_ids.add(seg)
+
         # In live mode, evaluate staleness against wall-clock time; in replay mode, evaluate against target date
         if eval_time is not None:
             effective_eval_time = eval_time
@@ -166,16 +201,117 @@ class LiveRiskService:
         else:
             effective_eval_time = target_dt + timedelta(hours=12)
 
-        predictions: List[SegmentPrediction] = engine.predict_corridor(
-            target_date=target_date,
-            weather_df=obs_df,
-            static_df=static_df,
-            eval_time=effective_eval_time,
-            stale_hours_limit=24.0,
-        )
+        n_total_segs = len(engine.segment_order)
+        missing_fraction = len(missing_segment_ids) / n_total_segs if n_total_segs > 0 else 1.0
+
+        if missing_fraction > self.MISSING_DATA_THRESHOLD:
+            # Missing data exceeds threshold (25%): all corridor segments are flagged MISSING_DATA/UNKNOWN
+            predictions: List[SegmentPrediction] = [
+                SegmentPrediction(
+                    segment_id=seg,
+                    risk_score=None,
+                    risk_tier="UNKNOWN",
+                    status="MISSING_DATA",
+                    is_stale=False,
+                    model_version=engine.model_version,
+                    prediction_horizon_hours=24,
+                    data_timestamp=f"{target_date}T00:00:00Z",
+                    warning=f"Corridor missing weather observations ({missing_fraction * 100:.1f}%) exceed threshold ({self.MISSING_DATA_THRESHOLD * 100:.0f}%).",
+                )
+                for seg in engine.segment_order
+            ]
+        else:
+            # Find segments adjacent to missing segments (via adjacency matrix A_hat)
+            neighbor_segment_ids = set()
+            for m_seg in missing_segment_ids:
+                m_idx = engine.seg_to_idx.get(m_seg)
+                if m_idx is not None:
+                    row_adj = engine.A_hat[m_idx]
+                    for j, val in enumerate(row_adj):
+                        if j != m_idx and val > 0:
+                            n_seg = engine.segment_order[j]
+                            if n_seg not in missing_segment_ids:
+                                neighbor_segment_ids.add(n_seg)
+
+            # Prepare sanitized_df so no unfilled/NaN values can ever reach the model tensor
+            sanitized_df = obs_df.copy()
+            clean_sub = sanitized_df[~sanitized_df["segment_id"].isin(missing_segment_ids)]
+
+            daily_means: Dict[str, Dict[str, float]] = {}
+            for d in required_dates:
+                d_rows = clean_sub[clean_sub["obs_date"] == d]
+                daily_means[d] = {}
+                for feat in EXPECTED_DYNAMIC_FEATURES:
+                    if not d_rows.empty and not pd.isna(d_rows[feat].mean()):
+                        daily_means[d][feat] = float(d_rows[feat].mean())
+                    else:
+                        daily_means[d][feat] = 0.0
+
+            filled_records = []
+            for seg in missing_segment_ids:
+                for d in required_dates:
+                    rec = {
+                        "segment_id": seg,
+                        "obs_date": d,
+                        "date": d,
+                        "source": source_filter or "open-meteo",
+                        "fetched_at": now_iso,
+                        "quality_flag": "OK",
+                    }
+                    for feat in EXPECTED_DYNAMIC_FEATURES:
+                        rec[feat] = daily_means[d][feat]
+                    filled_records.append(rec)
+
+            if filled_records:
+                sanitized_df = sanitized_df[~sanitized_df["segment_id"].isin(missing_segment_ids)]
+                sanitized_df = pd.concat([sanitized_df, pd.DataFrame(filled_records)], ignore_index=True)
+
+            if "date" not in sanitized_df.columns:
+                sanitized_df["date"] = sanitized_df["obs_date"]
+
+            raw_predictions = engine.predict_corridor(
+                target_date=target_date,
+                weather_df=sanitized_df,
+                static_df=static_df,
+                eval_time=effective_eval_time,
+                stale_hours_limit=24.0,
+            )
+
+            # Map predictions: missing segments -> MISSING_DATA; adjacent neighbors -> NEIGHBOUR_DATA_MISSING
+            predictions: List[SegmentPrediction] = []
+            for p in raw_predictions:
+                if p.segment_id in missing_segment_ids:
+                    predictions.append(
+                        SegmentPrediction(
+                            segment_id=p.segment_id,
+                            risk_score=None,
+                            risk_tier="UNKNOWN",
+                            status="MISSING_DATA",
+                            is_stale=p.is_stale,
+                            model_version=p.model_version,
+                            prediction_horizon_hours=p.prediction_horizon_hours,
+                            data_timestamp=p.data_timestamp,
+                            warning="Weather observation data missing or incomplete for segment lookback window.",
+                        )
+                    )
+                elif p.segment_id in neighbor_segment_ids:
+                    predictions.append(
+                        SegmentPrediction(
+                            segment_id=p.segment_id,
+                            risk_score=None,
+                            risk_tier="UNKNOWN",
+                            status="NEIGHBOUR_DATA_MISSING",
+                            is_stale=p.is_stale,
+                            model_version=p.model_version,
+                            prediction_horizon_hours=p.prediction_horizon_hours,
+                            data_timestamp=p.data_timestamp,
+                            warning="Adjacent road segment has missing weather observations; spatial convolution relies on imputed data.",
+                        )
+                    )
+                else:
+                    predictions.append(p)
 
         # 4. Persist to live_risk table
-        now_iso = datetime.now(timezone.utc).isoformat()
         records = []
         for p in predictions:
             records.append((
@@ -226,17 +362,17 @@ class LiveRiskService:
             from src.services.live_broadcast_service import live_broadcaster
             live_broadcaster.broadcast_sync("risk_update", {
                 "as_of": target_date,
-                "computed_at": computed_at_iso,
+                "computed_at": now_iso,
                 "segments_count": len(records),
             })
             live_broadcaster.broadcast_sync("route_update", {
                 "reason": "risk_recomputed",
                 "as_of": target_date,
-                "timestamp": computed_at_iso,
+                "timestamp": now_iso,
             })
             live_broadcaster.broadcast_sync("status", self.get_live_status())
         except Exception as e:
-            logger.debug("Live risk broadcast skipped or failed: %s", e)
+            logger.warning("Live risk broadcast failed: %s", e, exc_info=True)
 
         out = []
         for p in predictions:

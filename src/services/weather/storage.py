@@ -13,7 +13,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 import pandas as pd
 
@@ -46,13 +46,13 @@ class WeatherStorage:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     segment_id TEXT NOT NULL,
                     obs_date TEXT NOT NULL,
-                    precip_mm REAL NOT NULL,
-                    snowfall_mm_we REAL NOT NULL,
-                    temp_mean_c REAL NOT NULL,
-                    temp_min_c REAL NOT NULL,
-                    snow_depth_m REAL NOT NULL,
-                    precip_3d_mm REAL NOT NULL,
-                    precip_7d_mm REAL NOT NULL,
+                    precip_mm REAL,
+                    snowfall_mm_we REAL,
+                    temp_mean_c REAL,
+                    temp_min_c REAL,
+                    snow_depth_m REAL,
+                    precip_3d_mm REAL,
+                    precip_7d_mm REAL,
                     source TEXT NOT NULL,
                     fetched_at TEXT NOT NULL,
                     quality_flag TEXT NOT NULL DEFAULT 'OK',
@@ -60,6 +60,49 @@ class WeatherStorage:
                 );
                 """
             )
+            # Idempotent non-destructive migration if existing table has NOT NULL constraints
+            table_info = conn.execute("PRAGMA table_info(weather_observation);").fetchall()
+            feature_cols = {
+                "precip_mm", "snowfall_mm_we", "temp_mean_c", "temp_min_c",
+                "snow_depth_m", "precip_3d_mm", "precip_7d_mm",
+            }
+            if any(col["name"] in feature_cols and col["notnull"] == 1 for col in table_info):
+                conn.execute("ALTER TABLE weather_observation RENAME TO weather_observation_legacy;")
+                conn.execute(
+                    """
+                    CREATE TABLE weather_observation (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        segment_id TEXT NOT NULL,
+                        obs_date TEXT NOT NULL,
+                        precip_mm REAL,
+                        snowfall_mm_we REAL,
+                        temp_mean_c REAL,
+                        temp_min_c REAL,
+                        snow_depth_m REAL,
+                        precip_3d_mm REAL,
+                        precip_7d_mm REAL,
+                        source TEXT NOT NULL,
+                        fetched_at TEXT NOT NULL,
+                        quality_flag TEXT NOT NULL DEFAULT 'OK',
+                        UNIQUE(segment_id, obs_date, source)
+                    );
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO weather_observation (
+                        id, segment_id, obs_date, precip_mm, snowfall_mm_we,
+                        temp_mean_c, temp_min_c, snow_depth_m, precip_3d_mm,
+                        precip_7d_mm, source, fetched_at, quality_flag
+                    )
+                    SELECT id, segment_id, obs_date, precip_mm, snowfall_mm_we,
+                           temp_mean_c, temp_min_c, snow_depth_m, precip_3d_mm,
+                           precip_7d_mm, source, fetched_at, quality_flag
+                    FROM weather_observation_legacy;
+                    """
+                )
+                conn.execute("DROP TABLE weather_observation_legacy;")
+
             conn.execute("CREATE INDEX IF NOT EXISTS idx_weather_obs_date ON weather_observation(obs_date);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_weather_obs_seg_date ON weather_observation(segment_id, obs_date);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_weather_obs_source ON weather_observation(source);")
@@ -94,18 +137,23 @@ class WeatherStorage:
         if "quality_flag" not in work_df.columns:
             work_df["quality_flag"] = "OK"
 
+        def _to_db_float(val: Any) -> Optional[float]:
+            if val is None or pd.isna(val):
+                return None
+            return float(val)
+
         records = []
         for _, row in work_df.iterrows():
             records.append((
                 str(row["segment_id"]),
                 str(row["obs_date"]),
-                float(row["precip_mm"]),
-                float(row["snowfall_mm_we"]),
-                float(row["temp_mean_c"]),
-                float(row["temp_min_c"]),
-                float(row["snow_depth_m"]),
-                float(row["precip_3d_mm"]),
-                float(row["precip_7d_mm"]),
+                _to_db_float(row["precip_mm"]),
+                _to_db_float(row["snowfall_mm_we"]),
+                _to_db_float(row["temp_mean_c"]),
+                _to_db_float(row["temp_min_c"]),
+                _to_db_float(row["snow_depth_m"]),
+                _to_db_float(row["precip_3d_mm"]),
+                _to_db_float(row["precip_7d_mm"]),
                 str(row["source"]),
                 str(row["fetched_at"]),
                 str(row["quality_flag"]),
