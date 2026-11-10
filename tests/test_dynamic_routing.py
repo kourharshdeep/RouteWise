@@ -94,8 +94,9 @@ def test_live_mode_side_by_side_routing():
     assert risk_aware["estimated_travel_minutes"] >= baseline["estimated_travel_minutes"]
 
 
-def test_closed_segment_triggers_hold_recommendation():
+def test_closed_segment_triggers_hold_recommendation(set_live_mode):
     """If a segment on the route is closed, recommendation must be HOLD and passable=False."""
+    set_live_mode("replay")
     # Pick a segment traversed on the Ramban-Banihal route (e.g., segment 40 from sorted segments)
     route_res = client.post(
         "/api/v1/journey/plan",

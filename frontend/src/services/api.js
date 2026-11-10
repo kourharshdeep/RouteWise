@@ -405,3 +405,13 @@ export async function stepReplayScenario(stepIndex) {
   }
   return res.json();
 }
+
+export async function fetchActiveEvents() {
+  const res = await fetch(`${API_BASE}/api/v1/events/active`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch active events (HTTP ${res.status})`);
+  }
+  return res.json();
+}

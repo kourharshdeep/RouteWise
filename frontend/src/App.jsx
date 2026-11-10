@@ -20,8 +20,15 @@ import {
   fetchLiveRisk,
   getLiveStreamUrl,
   fetchActiveAlerts,
+  fetchActiveEvents,
 } from "./services/api";
 import { resolveEffectiveMode, getEffectiveDate } from "./services/liveModeHelper";
+import {
+  ConnectionStateMachine,
+  reconcileAlerts,
+  reconcileHazardEvents,
+  RESILIENCE_CONFIG,
+} from "./services/connectionResilience";
 
 import Navigation from "./components/Navigation";
 import Overview from "./components/Overview";
@@ -38,6 +45,7 @@ import SignInView from "./components/SignInView";
 import SignUpView from "./components/SignUpView";
 import IncidentReporter from "./components/IncidentReporter";
 import AlertDrawer from "./components/AlertDrawer";
+import ErrorBoundary from "./components/ErrorBoundary";
 import PatrolDashboard from "./components/PatrolDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -66,6 +74,7 @@ function DashboardLayout({
   setDashboardMode,
   liveStatus,
   connectionStatus,
+  lastSuccessfulUpdate,
   onRefreshLive,
   isLiveUpdated,
   lastRouteUpdate,
@@ -119,6 +128,8 @@ function DashboardLayout({
 
   // Derive active tab from pathname
   const currentPath = location.pathname.replace(/^\//, "") || "overview";
+  const isReplayMode = dashboardMode === "replay" || (dashboardMode === "live" && liveStatus?.mode === "replay");
+  const visibleAlerts = (alerts || []).filter((a) => isReplayMode || !a.is_simulated);
 
   return (
     <div className="app-layout">
@@ -127,6 +138,8 @@ function DashboardLayout({
         theme={theme}
         setTheme={setTheme}
         health={health}
+        activeAlertCount={visibleAlerts.length}
+        onOpenAlerts={() => setIsAlertDrawerOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -204,6 +217,7 @@ function DashboardLayout({
                   onModeChange={setDashboardMode}
                   liveStatus={liveStatus}
                   connectionStatus={connectionStatus}
+                  lastSuccessfulUpdate={lastSuccessfulUpdate}
                   onRefreshLive={onRefreshLive}
                   isLiveUpdated={isLiveUpdated}
                   onScenarioStepped={onScenarioStepped}
@@ -217,6 +231,7 @@ function DashboardLayout({
                   onNavigateToMap={() => navigate("/map")}
                   mode={dashboardMode}
                   lastRouteUpdate={lastRouteUpdate}
+                  riskData={riskData}
                 />
               }
             />
@@ -234,6 +249,7 @@ function DashboardLayout({
                     onModeChange={setDashboardMode}
                     liveStatus={liveStatus}
                     connectionStatus={connectionStatus}
+                    lastSuccessfulUpdate={lastSuccessfulUpdate}
                     onRefreshLive={onRefreshLive}
                   />
 
@@ -286,7 +302,7 @@ function DashboardLayout({
       <AlertDrawer
         isOpen={isAlertDrawerOpen}
         onClose={() => setIsAlertDrawerOpen(false)}
-        alerts={alerts}
+        alerts={visibleAlerts}
         onAlertUpdated={refreshAlerts}
       />
     </div>
@@ -346,10 +362,11 @@ function AppContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Real-Time Intelligence & SSE Stream States (Step 5)
+  // Real-Time Intelligence & Connection Resilience States
   const [dashboardMode, setDashboardMode] = useState("historical"); // 'historical' | 'live'
   const [liveStatus, setLiveStatus] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState("connected"); // 'connected' | 'lost'
+  const [connectionStatus, setConnectionStatus] = useState("connected"); // 'connected' | 'reconnecting' | 'polling' | 'offline'
+  const [lastSuccessfulUpdate, setLastSuccessfulUpdate] = useState(null);
   const [isLiveUpdated, setIsLiveUpdated] = useState(false);
   const [lastRouteUpdate, setLastRouteUpdate] = useState(null);
   const [alerts, setAlerts] = useState([]);
@@ -358,7 +375,7 @@ function AppContent() {
   const refreshAlerts = async () => {
     try {
       const res = await fetchActiveAlerts();
-      setAlerts(res.alerts || []);
+      setAlerts((prev) => reconcileAlerts(prev, res.alerts || []));
     } catch (err) {
       console.debug("Failed to refresh active alerts:", err);
     }
@@ -452,138 +469,281 @@ function AppContent() {
     }
   };
 
-  // SSE Stream subscription and 60-second fallback polling
+  // Real-Time Intelligence & SSE Stream / Reconnection / Polling Management
   useEffect(() => {
     if (dashboardMode !== "live") return;
 
     let isMounted = true;
     let pollTimer = null;
+    let reconnectTimer = null;
+    let sseProbeTimer = null;
     let es = null;
 
-    async function initLive() {
+    const stateMachine = new ConnectionStateMachine({
+      onStateChange: (newState) => {
+        if (isMounted) setConnectionStatus(newState);
+      },
+    });
+
+    const reconcileAll = async () => {
+      if (!isMounted) return;
       try {
-        const [st, rk] = await Promise.all([
+        const [st, rk, alRes] = await Promise.all([
           fetchLiveStatus().catch(() => null),
           fetchLiveRisk().catch(() => null),
+          fetchActiveAlerts().catch(() => null),
         ]);
-        if (isMounted) {
-          if (st) setLiveStatus(st);
-          if (rk) setRiskData(rk);
-        }
-      } catch (err) {
-        console.warn("Initial live telemetry fetch failed:", err);
-      }
-    }
-
-    initLive();
-
-    try {
-      es = new EventSource(getLiveStreamUrl());
-
-      es.onopen = () => {
-        if (isMounted) setConnectionStatus("connected");
-      };
-
-      es.addEventListener("status", (e) => {
         if (!isMounted) return;
-        try {
-          const parsed = JSON.parse(e.data);
-          setLiveStatus(parsed);
-        } catch (err) {
-          console.debug("SSE status parse error:", err);
+        if (st) setLiveStatus(st);
+        if (rk) setRiskData(rk);
+        if (alRes?.alerts) {
+          setAlerts((prev) => reconcileAlerts(prev, alRes.alerts));
         }
-      });
-
-      es.addEventListener("risk_update", (e) => {
-        if (!isMounted) return;
-        try {
-          const parsed = JSON.parse(e.data);
-          if (parsed.segments && parsed.segments.length > 0) {
-            setRiskData(parsed);
-          } else {
-            fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
-          }
-          setIsLiveUpdated(true);
-          setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
-        } catch (err) {
-          console.debug("SSE risk parse error:", err);
-        }
-      });
-
-      es.addEventListener("event_update", () => {
-        if (!isMounted) return;
-        fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
-        fetchLiveStatus().then((d) => isMounted && setLiveStatus(d)).catch(() => {});
-        refreshAlerts();
+        stateMachine.handleSuccess();
+        setLastSuccessfulUpdate(new Date().toISOString());
         setIsLiveUpdated(true);
         setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
-      });
+      } catch (err) {
+        console.warn("Telemetry reconciliation error:", err);
+      }
+    };
 
-      es.addEventListener("alert", () => {
-        if (!isMounted) return;
-        refreshAlerts();
-        fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
-      });
-
-      es.addEventListener("route_update", (e) => {
-        if (!isMounted) return;
+    const cleanupSse = () => {
+      if (es) {
         try {
-          const parsed = JSON.parse(e.data);
-          const d = new Date(parsed.timestamp || Date.now());
-          const hh = String(d.getHours()).padStart(2, "0");
-          const mm = String(d.getMinutes()).padStart(2, "0");
-          setLastRouteUpdate({
-            time: `${hh}:${mm}`,
-            reason: parsed.reason || "hazard_update",
-            eventId: parsed.event_id,
-            timestamp: parsed.timestamp || new Date().toISOString(),
-          });
-        } catch (err) {
-          console.debug("SSE route_update parse error:", err);
-        }
-      });
+          es.close();
+        } catch (e) {}
+        es = null;
+      }
+    };
 
-      es.addEventListener("heartbeat", () => {
-        if (isMounted) setConnectionStatus("connected");
-      });
+    const cleanupTimers = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      if (sseProbeTimer) {
+        clearTimeout(sseProbeTimer);
+        sseProbeTimer = null;
+      }
+    };
 
-      es.onerror = () => {
+    const pollOnce = async () => {
+      if (!isMounted) return;
+      try {
+        const [st, rk, alRes] = await Promise.all([
+          fetchLiveStatus().catch(() => null),
+          fetchLiveRisk().catch(() => null),
+          fetchActiveAlerts().catch(() => null),
+        ]);
         if (!isMounted) return;
-        console.warn("SSE connection dropped, falling back to 60s polling...");
-        if (es) es.close();
-        setConnectionStatus("lost");
-
-        if (!pollTimer) {
-          pollTimer = setInterval(async () => {
-            if (!isMounted) return;
-            try {
-              const [st, rk] = await Promise.all([
-                fetchLiveStatus().catch(() => null),
-                fetchLiveRisk().catch(() => null),
-              ]);
-              if (isMounted) {
-                if (st) setLiveStatus(st);
-                if (rk) {
-                  setRiskData(rk);
-                  setIsLiveUpdated(true);
-                  setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
-                }
-              }
-            } catch (err) {
-              console.warn("Fallback poll error:", err);
-            }
-          }, 60000);
+        if (st && rk) {
+          setLiveStatus(st);
+          setRiskData(rk);
+          if (alRes?.alerts) {
+            setAlerts((prev) => reconcileAlerts(prev, alRes.alerts));
+          }
+          stateMachine.handleSuccess();
+          setLastSuccessfulUpdate(new Date().toISOString());
+          setIsLiveUpdated(true);
+          setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+        } else {
+          const pollErr = stateMachine.handlePollError({ isOnline: navigator.onLine });
+          setConnectionStatus(pollErr.nextState);
         }
-      };
-    } catch (err) {
-      console.warn("EventSource setup error:", err);
-      setConnectionStatus("lost");
-    }
+      } catch (err) {
+        console.warn("Fallback poll error:", err);
+        const pollErr = stateMachine.handlePollError({ isOnline: navigator.onLine });
+        setConnectionStatus(pollErr.nextState);
+      }
+    };
+
+    const startPollingFallback = (initialDelayMs = 0) => {
+      if (pollTimer) return;
+      if (initialDelayMs > 0) {
+        setTimeout(pollOnce, initialDelayMs);
+      } else {
+        pollOnce();
+      }
+      pollTimer = setInterval(pollOnce, RESILIENCE_CONFIG.BASE_POLL_MS);
+
+      // In the background, periodically probe SSE reconnection
+      scheduleSseProbe();
+    };
+
+    const scheduleSseProbe = () => {
+      if (!isMounted || es) return;
+      if (sseProbeTimer) clearTimeout(sseProbeTimer);
+      sseProbeTimer = setTimeout(() => {
+        if (!isMounted) return;
+        if (stateMachine.getState() === "polling") {
+          connectSse();
+        }
+      }, RESILIENCE_CONFIG.MAX_RECONNECT_MS);
+    };
+
+    const handleSseFailure = () => {
+      if (!isMounted) return;
+      cleanupSse();
+      const res = stateMachine.handleSseError({ isOnline: navigator.onLine });
+      setConnectionStatus(res.nextState);
+
+      if (res.shouldPoll) {
+        startPollingFallback(res.delayMs);
+      } else {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => {
+          if (isMounted) connectSse();
+        }, res.delayMs);
+      }
+    };
+
+    const connectSse = () => {
+      if (!isMounted) return;
+      cleanupSse();
+
+      try {
+        es = new EventSource(getLiveStreamUrl());
+
+        es.onopen = () => {
+          if (!isMounted) return;
+          stateMachine.handleSuccess();
+          setConnectionStatus("connected");
+          setLastSuccessfulUpdate(new Date().toISOString());
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          reconcileAll();
+        };
+
+        es.addEventListener("status", (e) => {
+          if (!isMounted) return;
+          try {
+            const parsed = JSON.parse(e.data);
+            setLiveStatus(parsed);
+            stateMachine.handleSuccess();
+            setLastSuccessfulUpdate(new Date().toISOString());
+          } catch (err) {
+            console.debug("SSE status parse error:", err);
+          }
+        });
+
+        es.addEventListener("risk_update", (e) => {
+          if (!isMounted) return;
+          try {
+            const parsed = JSON.parse(e.data);
+            if (parsed.segments && parsed.segments.length > 0) {
+              setRiskData(parsed);
+            } else {
+              fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
+            }
+            stateMachine.handleSuccess();
+            setLastSuccessfulUpdate(new Date().toISOString());
+            setIsLiveUpdated(true);
+            setTimeout(() => isMounted && setIsLiveUpdated(false), 1400);
+          } catch (err) {
+            console.debug("SSE risk parse error:", err);
+          }
+        });
+
+        es.addEventListener("event_update", () => {
+          if (!isMounted) return;
+          reconcileAll();
+        });
+
+        es.addEventListener("alert", () => {
+          if (!isMounted) return;
+          refreshAlerts();
+          fetchLiveRisk().then((d) => isMounted && setRiskData(d)).catch(() => {});
+          stateMachine.handleSuccess();
+          setLastSuccessfulUpdate(new Date().toISOString());
+        });
+
+        es.addEventListener("route_update", (e) => {
+          if (!isMounted) return;
+          try {
+            const parsed = JSON.parse(e.data);
+            const d = new Date(parsed.timestamp || Date.now());
+            const hh = String(d.getHours()).padStart(2, "0");
+            const mm = String(d.getMinutes()).padStart(2, "0");
+            setLastRouteUpdate({
+              time: `${hh}:${mm}`,
+              reason: parsed.reason || "hazard_update",
+              eventId: parsed.event_id,
+              timestamp: parsed.timestamp || new Date().toISOString(),
+            });
+            stateMachine.handleSuccess();
+            setLastSuccessfulUpdate(new Date().toISOString());
+          } catch (err) {
+            console.debug("SSE route_update parse error:", err);
+          }
+        });
+
+        es.addEventListener("heartbeat", () => {
+          if (!isMounted) return;
+          stateMachine.handleSuccess();
+          setConnectionStatus("connected");
+        });
+
+        es.onerror = () => {
+          handleSseFailure();
+        };
+      } catch (err) {
+        console.warn("EventSource creation error:", err);
+        handleSseFailure();
+      }
+    };
+
+    // Tab visibility handling: pause retries when tab is hidden, resume on visibility
+    const handleVisibilityChange = () => {
+      if (!isMounted) return;
+      if (document.visibilityState === "visible") {
+        stateMachine.handleOnlineResume();
+        if (stateMachine.getState() !== "connected") {
+          connectSse();
+        }
+      } else {
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+      }
+    };
+
+    const handleOnline = () => {
+      if (!isMounted) return;
+      stateMachine.handleOnlineResume();
+      connectSse();
+    };
+
+    const handleOffline = () => {
+      if (!isMounted) return;
+      stateMachine.handleSseError({ isOnline: false });
+      setConnectionStatus("offline");
+      cleanupSse();
+      cleanupTimers();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    // Initial connection attempt
+    connectSse();
 
     return () => {
       isMounted = false;
-      if (es) es.close();
-      if (pollTimer) clearInterval(pollTimer);
+      cleanupSse();
+      cleanupTimers();
+      stateMachine.destroy();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
     };
   }, [dashboardMode]);
 
@@ -681,6 +841,7 @@ function AppContent() {
               setDashboardMode={handleModeChange}
               liveStatus={liveStatus}
               connectionStatus={connectionStatus}
+              lastSuccessfulUpdate={lastSuccessfulUpdate}
               onRefreshLive={handleRefreshLive}
               isLiveUpdated={isLiveUpdated}
               lastRouteUpdate={lastRouteUpdate}
@@ -702,7 +863,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <JourneyProvider>
-          <AppContent />
+          <ErrorBoundary>
+            <AppContent />
+          </ErrorBoundary>
         </JourneyProvider>
       </AuthProvider>
     </BrowserRouter>

@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { RESILIENCE_CONFIG, shouldRefreshPlanner, hasRecommendationChanged } from '../services/connectionResilience';
+import { getPlannerModeConfig, getDefaultDepartureTime } from '../services/plannerModeHelper';
 import { useJourney } from '../context/JourneyContext';
 import VehicleSelector from './VehicleSelector';
 import {
@@ -18,7 +21,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-export default function JourneyPlanner({ onNavigateToMap, mode = "historical", lastRouteUpdate = null }) {
+export default function JourneyPlanner({
+  onNavigateToMap,
+  mode = "historical",
+  lastRouteUpdate = null,
+  riskData = null,
+}) {
   const {
     vehicleType,
     origin,
@@ -49,10 +57,89 @@ export default function JourneyPlanner({ onNavigateToMap, mode = "historical", l
     { date: '2025-08-10', label: 'Summer Moderate' },
   ];
 
+  const { t } = useTranslation();
+  const config = getPlannerModeConfig({
+    mode,
+    liveAsOf: riskData?.as_of,
+    weatherWindowEnd: riskData?.weather_window_end,
+    replayDate: mode === 'replay' ? (riskData?.as_of || '2023-07-09') : null,
+  });
+
+  useEffect(() => {
+    if (mode === 'live' && departureTime === '08:00') {
+      setDepartureTime(getDefaultDepartureTime());
+    }
+  }, [mode]);
+
+  const [autoRefreshedAt, setAutoRefreshedAt] = useState(null);
+  const [recommendationDiffNotice, setRecommendationDiffNotice] = useState(null);
+  const autoRefreshTimerRef = useRef(null);
+  const isExecutingRef = useRef(false);
+  const prevRouteUpdateRef = useRef(lastRouteUpdate);
+  const prevRiskUpdateRef = useRef(riskData?.computed_at);
+
+  useEffect(() => {
+    isExecutingRef.current = isPlanning;
+  }, [isPlanning]);
+
+  useEffect(() => {
+    const routeChanged = Boolean(lastRouteUpdate) && lastRouteUpdate !== prevRouteUpdateRef.current;
+    const riskChanged = Boolean(riskData?.computed_at) && riskData?.computed_at !== prevRiskUpdateRef.current;
+    prevRouteUpdateRef.current = lastRouteUpdate;
+    prevRiskUpdateRef.current = riskData?.computed_at;
+
+    if (!routeChanged && !riskChanged) {
+      return;
+    }
+
+    if (!shouldRefreshPlanner({
+      mode,
+      hasActivePlan: Boolean(planResult),
+      isPlanning: isExecutingRef.current,
+      isTabVisible: typeof document !== 'undefined' ? !document.hidden : true,
+      changeDetected: true,
+    })) {
+      return;
+    }
+
+    if (autoRefreshTimerRef.current) {
+      clearTimeout(autoRefreshTimerRef.current);
+    }
+
+    autoRefreshTimerRef.current = setTimeout(async () => {
+      if (isExecutingRef.current) return;
+      try {
+        const prevRec = planResult?.recommendation;
+        const newRes = await executePlan({ mode });
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setAutoRefreshedAt(timeStr);
+        if (newRes && prevRec && hasRecommendationChanged(prevRec, newRes.recommendation)) {
+          setRecommendationDiffNotice({
+            oldRec: prevRec,
+            newRec: newRes.recommendation,
+            time: timeStr,
+          });
+        }
+      } catch (err) {
+        console.warn("Planner auto-refresh error:", err);
+      }
+    }, RESILIENCE_CONFIG.DEBOUNCE_REFRESH_MS);
+
+    return () => {
+      if (autoRefreshTimerRef.current) {
+        clearTimeout(autoRefreshTimerRef.current);
+      }
+    };
+  }, [lastRouteUpdate, riskData?.computed_at, mode, planResult, executePlan]);
+
   const handlePlanSubmit = async (e) => {
     e.preventDefault();
     try {
-      await executePlan({ mode });
+      await executePlan({
+        mode,
+        date: config.isLive ? (config.evaluationDate || undefined) : undefined,
+      });
     } catch (err) {
       // handled
     }
@@ -189,16 +276,16 @@ export default function JourneyPlanner({ onNavigateToMap, mode = "historical", l
         </div>
 
         {/* Retrospective Science Banner & Single-Path Corridor Honesty Notice */}
-        <div className="retrospective-banner">
+        <div className={`retrospective-banner ${config.isLive ? 'live-banner-style' : config.isReplay ? 'replay-banner-style' : ''}`}>
           <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
           <div>
-            <strong>Single-Path Corridor Topology & Retrospective Analysis Notice:</strong> The NH-44 Ramban–Banihal section is a 
-            <strong> single continuous linear mountain highway</strong>; topological alternative paths (such as parallel bypasses) 
-            do <em>not</em> exist within this corridor road graph. Consequently, fastest and safest routes follow the identical physical sequence of segments.
+            <strong>{t(config.headerNoticeTitleKey, config.headerNoticeTitleText)}</strong>{' '}
+            {t('planner.linear_topology_notice', 'The NH-44 Ramban–Banihal section is a single continuous linear mountain highway; topological alternative paths (such as parallel bypasses) do not exist within this corridor road graph. Consequently, fastest and safest routes follow the identical physical sequence of segments.')}
+
             <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
-              • <strong>Vehicle type:</strong> Configures speed thresholds and hazard vulnerability advisories, but does not alter physical highway geometry.
+              • <strong>{t('planner.vehicle_type_label', 'Vehicle type:')}</strong> {t('planner.vehicle_type_notice', 'Configures speed thresholds and hazard vulnerability advisories, but does not alter physical highway geometry.')}
               <br />
-              • <strong>Departure time:</strong> Calibrates estimated arrival times, but daily retrospective ST-GNN risk predictions do not change by hour.
+              • <strong>{t('planner.departure_time_label', 'Departure time:')}</strong> {t(config.departureTimeNoticeKey, config.departureTimeNoticeText)}
             </div>
           </div>
         </div>
@@ -279,28 +366,49 @@ export default function JourneyPlanner({ onNavigateToMap, mode = "historical", l
 
         {/* Step 3: Date & Departure Timings */}
         <div className="form-section">
-          <label className="section-label">Travel Schedule & Benchmark Timing</label>
+          <label className="section-label">{t(config.scheduleTitleKey, config.scheduleTitleText)}</label>
           <div className="timings-grid">
             <div className="form-group">
               <label>
                 <Calendar size={14} style={{ display: 'inline', marginRight: 4, color: 'var(--text-muted)' }} />
-                Journey Evaluation Date:
+                {t('planner.evaluation_date', 'Journey Evaluation Date:')}
               </label>
-              <input
-                type="date"
-                value={journeyDate}
-                min="2021-01-06"
-                max="2025-12-31"
-                onChange={(e) => setJourneyDate(e.target.value)}
-                className="date-input"
-                required
-              />
+              {config.isDateEditable ? (
+                <input
+                  type="date"
+                  value={journeyDate}
+                  min="2021-01-06"
+                  max="2025-12-31"
+                  onChange={(e) => setJourneyDate(e.target.value)}
+                  className="date-input"
+                  required
+                />
+              ) : (
+                <div className="planner-readonly-date-container">
+                  <div className="planner-readonly-date">
+                    <span className="planner-date-value">{config.evaluationDate}</span>
+                    <span className={`planner-mode-badge ${config.statusBadgeClass}`}>
+                      {t(config.statusBadgeKey, config.statusBadgeText)}
+                    </span>
+                  </div>
+                  {config.weatherWindowEnd && (
+                    <div className="planner-window-end-text">
+                      {t('planner.weather_window_through', 'Weather window through')}: {config.weatherWindowEnd}
+                    </div>
+                  )}
+                  {config.isLive && (
+                    <div className="planner-experimental-note">
+                      {t('planner.experimental_warning', 'Experimental - not validated for life-safety')}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="form-group">
               <label>
                 <Clock size={14} style={{ display: 'inline', marginRight: 4, color: 'var(--text-muted)' }} />
-                Preferred Departure Time:
+                {t('planner.departure_time_label', 'Preferred Departure Time:')}
               </label>
               <input
                 type="time"
@@ -309,6 +417,11 @@ export default function JourneyPlanner({ onNavigateToMap, mode = "historical", l
                 className="date-input"
                 required
               />
+              {config.departureHelpKey && (
+                <div className="departure-daily-help">
+                  {t(config.departureHelpKey, config.departureHelpText)}
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -327,19 +440,23 @@ export default function JourneyPlanner({ onNavigateToMap, mode = "historical", l
           </div>
 
           {/* Benchmark Date Quick Select Chips */}
-          <div className="benchmark-chips-row">
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Historical Benchmark Spells:</span>
-            {benchmarkDates.map((b) => (
-              <button
-                key={b.date}
-                type="button"
-                className={`sample-btn ${journeyDate === b.date ? 'active' : ''}`}
-                onClick={() => setJourneyDate(b.date)}
-              >
-                {b.date} • {b.label}
-              </button>
-            ))}
-          </div>
+          {config.showBenchmarkButtons && (
+            <div className="benchmark-chips-row">
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>
+                {t('planner.historical_benchmarks', 'Historical Benchmark Spells:')}
+              </span>
+              {benchmarkDates.map((b) => (
+                <button
+                  key={b.date}
+                  type="button"
+                  className={`sample-btn ${journeyDate === b.date ? 'active' : ''}`}
+                  onClick={() => setJourneyDate(b.date)}
+                >
+                  {b.date} ? {b.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {planError && (
@@ -378,9 +495,45 @@ export default function JourneyPlanner({ onNavigateToMap, mode = "historical", l
                 <span className="endpoint-pill">{planResult.destination}</span>
               </div>
               <span className="journey-date-tag">Date: {planResult.journey_date}</span>
+              {autoRefreshedAt && mode === 'live' && (
+                <span className="planner-auto-refresh-badge" data-testid="planner-auto-refresh-badge">
+                  <RefreshCw size={11} className="spin-slow" aria-hidden="true" />
+                  {t('journey.plan_auto_refreshed', { time: autoRefreshedAt })}
+                </span>
+              )}
             </div>
             <div>{getRiskBadge(planResult.overall_route_risk)}</div>
           </div>
+
+          {/* Visible Notification when Auto-Refresh Alters Recommendation */}
+          {recommendationDiffNotice && mode === 'live' && (
+            <div
+              className="recommendation-change-notice"
+              data-testid="recommendation-change-notice"
+              role="alert"
+              style={{
+                background: 'var(--warning-bg)',
+                color: 'var(--warning-text, var(--warning))',
+                border: '1px solid var(--warning-border)',
+                borderRadius: 8,
+                padding: '8px 12px',
+                margin: '12px 0',
+                fontSize: 13,
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span>
+                {t('journey.recommendation_changed_notice', {
+                  oldRec: recommendationDiffNotice.oldRec,
+                  newRec: recommendationDiffNotice.newRec,
+                })}
+              </span>
+            </div>
+          )}
 
           {/* Operational Recommendation Banner (Task 4) */}
           {planResult.recommendation && renderRecommendation(

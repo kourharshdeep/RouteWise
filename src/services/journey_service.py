@@ -329,9 +329,21 @@ class JourneyService:
         if mode == "live":
             from src.services.live_risk_service import MAX_DATA_AGE_HOURS, live_risk_service
 
+            # In live mode, evaluate against live operational telemetry.
+            # If the request provides a date, attempt evaluation for that date.
+            # If that date yields no live data (e.g. leftover historical date like '2023-07-09'),
+            # safely ignore the historical date and fallback to latest live risk (as_of=None)
+            # so live plans never silently return NO_DATA due to leftover client date state.
             live_risk = live_risk_service.get_latest_live_risk(as_of=req.date, eval_time=now)
+            if req.date and (not live_risk.get("segments")):
+                logger.warning(
+                    "Requested date '%s' yielded no segments in live mode; "
+                    "falling back to latest live risk (as_of=None).",
+                    req.date,
+                )
+                live_risk = live_risk_service.get_latest_live_risk(as_of=None, eval_time=now)
 
-            journey_date_str = req.date or live_risk.get("as_of") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            journey_date_str = live_risk.get("as_of") or req.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
             for seg in live_risk.get("segments", []):
                 risk_lookup[seg["segment_id"]] = seg

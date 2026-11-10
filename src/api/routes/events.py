@@ -67,9 +67,10 @@ def clear_simulated_events(
     summary="List active hazard events (Public)",
 )
 def get_active_events(
-    segment_id: Optional[str] = Query(None, description="Optional filter by road segment ID")
+    segment_id: Optional[str] = Query(None, description="Optional filter by road segment ID"),
+    include_simulated: Optional[bool] = Query(None, description="Optional override to include or exclude simulated events"),
 ) -> List[HazardEventItem]:
     """Returns currently active verified and simulated hazard events. Public read access."""
-    events = hazard_event_service.get_active_events(segment_id=segment_id)
+    events = hazard_event_service.get_active_events(segment_id=segment_id, include_simulated=include_simulated)
     return [HazardEventItem(**e) for e in events]
 

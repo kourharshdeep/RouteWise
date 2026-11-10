@@ -21,6 +21,7 @@ export default function ControlHeader({
   onModeChange,
   liveStatus,
   connectionStatus = 'connected',
+  lastSuccessfulUpdate = null,
   onRefreshLive,
 }) {
   const { t } = useTranslation();
@@ -66,6 +67,7 @@ export default function ControlHeader({
         onModeChange={onModeChange}
         liveStatus={liveStatus}
         connectionStatus={connectionStatus}
+        lastSuccessfulUpdate={lastSuccessfulUpdate}
         onRefresh={onRefreshLive}
         isLoading={isLoading}
       />

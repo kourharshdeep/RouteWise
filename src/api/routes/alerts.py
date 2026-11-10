@@ -32,13 +32,14 @@ router = APIRouter(prefix="/v1/alerts", tags=["Alerts & Monitoring"])
 )
 def get_active_alerts(
     limit: int = Query(100, ge=1, le=500),
+    include_simulated: Optional[bool] = Query(None, description="Optional override to include or exclude simulated alerts"),
 ) -> AlertListResponse:
     """Returns active and acknowledged corridor hazard alerts.
     
     Advisory alerts are delivered strictly in-app. Missing or stale data produces
     UNKNOWN status rather than low risk.
     """
-    alerts = alert_service.get_active_alerts(limit=limit)
+    alerts = alert_service.get_active_alerts(limit=limit, include_simulated=include_simulated)
     active_count = sum(1 for a in alerts if a["status"] == "active")
     ack_count = sum(1 for a in alerts if a["status"] == "acknowledged")
 
@@ -57,9 +58,10 @@ def get_active_alerts(
 )
 def get_alert_history(
     limit: int = Query(100, ge=1, le=500),
+    include_simulated: Optional[bool] = Query(None, description="Optional override to include or exclude simulated alerts"),
 ) -> AlertListResponse:
     """Returns chronological alert history including cleared alerts."""
-    alerts = alert_service.get_alert_history(limit=limit)
+    alerts = alert_service.get_alert_history(limit=limit, include_simulated=include_simulated)
     active_count = sum(1 for a in alerts if a["status"] == "active")
     ack_count = sum(1 for a in alerts if a["status"] == "acknowledged")
 

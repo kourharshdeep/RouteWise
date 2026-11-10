@@ -608,7 +608,11 @@ class LiveRiskService:
         now_today_utc = effective_now.date()
         now_yesterday_utc = now_today_utc - timedelta(days=1)
 
-        events_map = hazard_event_service.get_active_events_by_segment_map(now=effective_now)
+        inc_sim = (getattr(settings, "live_mode", "live") == "replay")
+        events_map = hazard_event_service.get_active_events_by_segment_map(
+            now=effective_now,
+            include_simulated=inc_sim,
+        )
         segments = []
         summary = {"Low": 0, "Medium": 0, "High": 0, "UNKNOWN": 0}
         op_summary = {"OPEN": 0, "CAUTION": 0, "RESTRICTED": 0, "CLOSED": 0, "UNKNOWN": 0}

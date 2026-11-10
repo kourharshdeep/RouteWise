@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Cpu,
+  Radio,
 } from 'lucide-react';
 import LiveBanner from './LiveBanner';
 import CorridorStrip from './CorridorStrip';
@@ -18,6 +19,7 @@ import RiskDetailDrawer from './RiskDetailDrawer';
 import OfficialAdvisoriesCard from './OfficialAdvisoriesCard';
 import AlongRouteServicesCard from './AlongRouteServicesCard';
 import ScenarioPlayer from './ScenarioPlayer';
+import { normalizeRiskSummary } from '../services/riskSummaryHelper';
 
 export default function Overview({
   health,
@@ -30,14 +32,16 @@ export default function Overview({
   onModeChange,
   liveStatus,
   connectionStatus = 'connected',
+  lastSuccessfulUpdate = null,
   onRefreshLive,
   isLiveUpdated = false,
   onScenarioStepped,
 }) {
   const isLive = mode === 'live';
+  const isReplay = mode === 'replay' || (mode === 'live' && liveStatus?.mode === 'replay');
   const { t } = useTranslation();
   const isHealthy = health && health.status === 'ok';
-  const summary = riskData?.summary;
+  const summary = riskData?.summary ? normalizeRiskSummary(riskData.summary) : null;
   const [activeDrawerSegId, setActiveDrawerSegId] = useState(null);
 
   const effectiveSelectedSegId = activeDrawerSegId || selectedSegment?.id || null;
@@ -58,10 +62,11 @@ export default function Overview({
         onModeChange={onModeChange}
         liveStatus={liveStatus}
         connectionStatus={connectionStatus}
+        lastSuccessfulUpdate={lastSuccessfulUpdate}
         onRefresh={onRefreshLive}
       />
       {/* Demo Replay Multi-Day Storm Scenario Player */}
-      {isLive && (
+      {isReplay && (
         <ScenarioPlayer onScenarioStepped={onScenarioStepped} />
       )}
 

@@ -382,8 +382,12 @@ class AlertService:
             live_risk_payload = live_risk_service.get_latest_live_risk(eval_time=now)
 
         if active_events is None:
+            from src.api.config import settings
             from src.services.hazard_event_service import hazard_event_service
-            active_events = hazard_event_service.get_active_events(now=now)
+            active_events = hazard_event_service.get_active_events(
+                now=now,
+                include_simulated=(getattr(settings, "live_mode", "live") == "replay"),
+            )
 
         events_by_seg: Dict[str, List[Dict[str, Any]]] = {}
         for ev in active_events:
@@ -612,14 +616,25 @@ class AlertService:
             conn.commit()
             return deleted
 
-    def get_active_alerts(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_active_alerts(
+        self,
+        limit: int = 100,
+        include_simulated: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
         """Retrieves active and acknowledged alerts sorted by severity and recency."""
         self.init_db()
+        from src.api.config import settings
+        inc_sim = (getattr(settings, "live_mode", "live") == "replay") if include_simulated is None else bool(include_simulated)
         with self._get_connection() as conn:
+            columns = {col[1] for col in conn.execute("PRAGMA table_info(alert)").fetchall()}
+            where_clauses = ["status IN ('active', 'acknowledged')"]
+            if "is_simulated" in columns and not inc_sim:
+                where_clauses.append("COALESCE(is_simulated, 0) = 0")
+            where_sql = " AND ".join(where_clauses)
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM alert
-                WHERE status IN ('active', 'acknowledged')
+                WHERE {where_sql}
                 ORDER BY
                     CASE severity
                         WHEN 'critical' THEN 1
@@ -635,12 +650,23 @@ class AlertService:
 
             return [self._format_alert(dict(r)) for r in rows]
 
-    def get_alert_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_alert_history(
+        self,
+        limit: int = 100,
+        include_simulated: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
         """Retrieves alert audit history including cleared alerts."""
         self.init_db()
+        from src.api.config import settings
+        inc_sim = (getattr(settings, "live_mode", "live") == "replay") if include_simulated is None else bool(include_simulated)
         with self._get_connection() as conn:
+            columns = {col[1] for col in conn.execute("PRAGMA table_info(alert)").fetchall()}
+            where_clauses = []
+            if "is_simulated" in columns and not inc_sim:
+                where_clauses.append("COALESCE(is_simulated, 0) = 0")
+            where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
             rows = conn.execute(
-                "SELECT * FROM alert ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM alert {where_sql} ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
             return [self._format_alert(dict(r)) for r in rows]

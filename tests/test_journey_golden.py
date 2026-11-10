@@ -114,6 +114,10 @@ def test_live_golden_output_with_seeded_hazards(tmp_path: Path, fixture_name: st
             duration_hours=24,
             user_id=1,
         )
+        with sqlite3.connect(test_db) as conn:
+            conn.execute("UPDATE hazard_event SET is_simulated = 0")
+            conn.commit()
+        hazard_event_service.invalidate_cache()
 
         req = JourneyPlanRequest(
             origin=origin,

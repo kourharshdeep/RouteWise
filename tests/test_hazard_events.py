@@ -116,8 +116,9 @@ def test_operational_status_rule_table():
     assert derive(model_risk_tier="Low", active_events=[]) == "OPEN"
 
 
-def test_role_matrix_simulation_endpoints():
+def test_role_matrix_simulation_endpoints(set_live_mode):
     """Verify simulation endpoints are strictly Admin-only (403 for patrol/user/guest)."""
+    set_live_mode("replay")
     # Ensure an admin account exists in auth DB
     with auth_service._get_connection() as conn:
         conn.execute(

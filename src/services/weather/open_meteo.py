@@ -49,6 +49,7 @@ class OpenMeteoProvider(WeatherProvider):
         backoff_factor: float = 0.5,
         fetcher: Optional[Callable[[str, float], dict]] = None,
         storage: Optional[Any] = None,
+        sleep_fn: Optional[Callable[[float], None]] = None,
     ) -> None:
         self.base_url = base_url
         self.timeout_seconds = timeout_seconds
@@ -56,6 +57,7 @@ class OpenMeteoProvider(WeatherProvider):
         self.backoff_factor = backoff_factor
         self._fetcher = fetcher or self._default_http_get
         self.storage = storage
+        self.sleep_fn = sleep_fn or time.sleep
         self._clusters: Optional[List[GridCluster]] = None
 
     @property
@@ -88,6 +90,8 @@ class OpenMeteoProvider(WeatherProvider):
             except urllib.error.HTTPError as he:
                 attempt += 1
                 logger.warning("HTTP %d fetching %s (attempt %d/%d): %s", he.code, url, attempt, self.max_retries, he.reason)
+                if attempt >= self.max_retries:
+                    break
                 if he.code == 429:
                     # Rate limit encountered: back off more aggressively
                     sleep_time = (self.backoff_factor * (2 ** attempt)) + 1.0
@@ -97,11 +101,13 @@ class OpenMeteoProvider(WeatherProvider):
                     # Client errors (4xx other than 429) should not retry
                     logger.error("Non-retryable client error %d from Open-Meteo: %s", he.code, he.reason)
                     return None
-                time.sleep(sleep_time)
+                self.sleep_fn(sleep_time)
             except (urllib.error.URLError, TimeoutError, OSError) as ex:
                 attempt += 1
                 logger.warning("Network error fetching %s (attempt %d/%d): %s", url, attempt, self.max_retries, ex)
-                time.sleep(self.backoff_factor * (2 ** attempt))
+                if attempt >= self.max_retries:
+                    break
+                self.sleep_fn(self.backoff_factor * (2 ** attempt))
             except Exception as exc:
                 logger.error("Unexpected error fetching Open-Meteo data: %s", exc, exc_info=True)
                 return None
@@ -240,16 +246,32 @@ class OpenMeteoProvider(WeatherProvider):
             if segment_filter and not any(sid in segment_filter for sid in cluster.segment_ids):
                 continue
 
-            raw = self.fetch_cluster_raw(
-                lat=cluster.latitude,
-                lon=cluster.longitude,
-                start_date=start_str,
-                end_date=end_str,
-            )
-            if raw is not None:
-                parsed = self.parse_cluster_response(raw, cluster)
-                if not parsed.empty:
-                    cluster_dfs.append(parsed)
+            try:
+                raw = self.fetch_cluster_raw(
+                    lat=cluster.latitude,
+                    lon=cluster.longitude,
+                    start_date=start_str,
+                    end_date=end_str,
+                )
+                if raw is not None:
+                    parsed = self.parse_cluster_response(raw, cluster)
+                    if not parsed.empty:
+                        cluster_dfs.append(parsed)
+                else:
+                    logger.warning(
+                        "Cluster %s (lat=%.3f, lon=%.3f, segments=%d) failed to fetch after %d attempts; segments remain missing/unknown.",
+                        cluster.cluster_id,
+                        cluster.latitude,
+                        cluster.longitude,
+                        len(cluster.segment_ids),
+                        self.max_retries,
+                    )
+            except Exception as cluster_err:
+                logger.warning(
+                    "Cluster %s failed with exception: %s. Continuing with remaining clusters.",
+                    cluster.cluster_id,
+                    cluster_err,
+                )
 
         if not cluster_dfs:
             logger.warning("No weather observations successfully fetched from Open-Meteo.")

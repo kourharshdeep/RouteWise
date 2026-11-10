@@ -42,19 +42,19 @@ class HazardEventService:
     def __init__(self, storage: Optional[WeatherStorage] = None) -> None:
         self.storage = storage or weather_storage
         self._initialized_dbs: set[Path] = set()
-        self._active_events_cache: Optional[List[Dict[str, Any]]] = None
-        self._cache_earliest_expires_at: Optional[str] = None
+        self._active_events_cache: Dict[bool, List[Dict[str, Any]]] = {}
+        self._cache_earliest_expires_at: Dict[bool, Optional[str]] = {}
 
     def invalidate_cache(self) -> None:
         """Invalidates in-memory active hazard events cache."""
-        self._active_events_cache = None
-        self._cache_earliest_expires_at = None
+        self._active_events_cache.clear()
+        self._cache_earliest_expires_at.clear()
 
     def reset_db_init(self) -> None:
         """Clears DB initialization tracking for tests."""
         self._initialized_dbs.clear()
-        self._active_events_cache = None
-        self._cache_earliest_expires_at = None
+        self._active_events_cache.clear()
+        self._cache_earliest_expires_at.clear()
 
     def _get_connection(self) -> sqlite3.Connection:
         self.storage.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,8 +98,11 @@ class HazardEventService:
                 )
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_seg ON hazard_event(segment_id, status);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_status ON hazard_event(status, expires_at);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_sim ON hazard_event(is_simulated);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_report ON hazard_event(source_report_id);")
+                cols = {c[1] for c in conn.execute("PRAGMA table_info(hazard_event)").fetchall()}
+                if "is_simulated" in cols:
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_sim ON hazard_event(is_simulated);")
+                if "source_report_id" in cols:
+                    conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_report ON hazard_event(source_report_id);")
 
                 # Audit trail table for lifecycle actions (create, refresh, close, auto-expire)
                 conn.execute(
@@ -387,39 +390,46 @@ class HazardEventService:
                 self._broadcast_event_change("clear_simulated")
             return len(sim_rows)
 
-    def get_active_events(self, segment_id: Optional[str] = None, now: Optional[datetime] = None) -> List[Dict[str, Any]]:
+    def get_active_events(
+        self,
+        segment_id: Optional[str] = None,
+        now: Optional[datetime] = None,
+        include_simulated: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
         """Returns active hazard events, auto-expiring overdue items first."""
         effective_now = now or datetime.now(timezone.utc)
         now_iso = effective_now.isoformat()
 
-        if segment_id is None and self._active_events_cache is not None:
-            if self._cache_earliest_expires_at and now_iso >= self._cache_earliest_expires_at:
+        inc_sim = (getattr(settings, "live_mode", "live") == "replay") if include_simulated is None else bool(include_simulated)
+        cache_key = inc_sim
+
+        if segment_id is None and cache_key in self._active_events_cache:
+            earliest_exp = self._cache_earliest_expires_at.get(cache_key)
+            if earliest_exp and now_iso >= earliest_exp:
                 self.expire_active_events(now=effective_now)
             else:
-                return self._active_events_cache
+                return self._active_events_cache[cache_key]
 
         self.expire_active_events(now=effective_now)
         with self._get_connection() as conn:
+            columns = {col[1] for col in conn.execute("PRAGMA table_info(hazard_event)").fetchall()}
+            where_clauses = ["status = 'active'"]
+            params: List[Any] = []
+
             if segment_id:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM hazard_event
-                    WHERE segment_id = ? AND status = 'active'
-                    ORDER BY starts_at DESC
-                    """,
-                    (segment_id,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT * FROM hazard_event
-                    WHERE status = 'active'
-                    ORDER BY starts_at DESC
-                    """
-                ).fetchall()
+                where_clauses.append("segment_id = ?")
+                params.append(segment_id)
+
+            if "is_simulated" in columns and not inc_sim:
+                where_clauses.append("COALESCE(is_simulated, 0) = 0")
+
+            where_sql = " AND ".join(where_clauses)
+            query = f"SELECT * FROM hazard_event WHERE {where_sql} ORDER BY starts_at DESC"
+            rows = conn.execute(query, params).fetchall()
 
         events = []
         for r in rows:
+            is_sim = bool(r["is_simulated"]) if ("is_simulated" in r.keys() and r["is_simulated"] is not None) else False
             events.append({
                 "id": r["id"],
                 "segment_id": r["segment_id"],
@@ -427,8 +437,8 @@ class HazardEventService:
                 "severity": r["severity"],
                 "status": r["status"],
                 "origin": r["origin"],
-                "is_simulated": bool(r["is_simulated"]),
-                "badge": "SIMULATED" if r["is_simulated"] else "VERIFIED",
+                "is_simulated": is_sim,
+                "badge": "SIMULATED" if is_sim else "VERIFIED",
                 "source_report_id": r["source_report_id"],
                 "starts_at": r["starts_at"],
                 "expires_at": r["expires_at"],
@@ -436,13 +446,17 @@ class HazardEventService:
                 "created_at": r["created_at"],
             })
         if segment_id is None:
-            self._active_events_cache = events
-            self._cache_earliest_expires_at = min((ev["expires_at"] for ev in events), default=None)
+            self._active_events_cache[cache_key] = events
+            self._cache_earliest_expires_at[cache_key] = min((ev["expires_at"] for ev in events), default=None)
         return events
 
-    def get_active_events_by_segment_map(self, now: Optional[datetime] = None) -> Dict[str, List[Dict[str, Any]]]:
+    def get_active_events_by_segment_map(
+        self,
+        now: Optional[datetime] = None,
+        include_simulated: Optional[bool] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """Builds a map of segment_id -> active_events."""
-        all_active = self.get_active_events(now=now)
+        all_active = self.get_active_events(now=now, include_simulated=include_simulated)
         res: Dict[str, List[Dict[str, Any]]] = {}
         for ev in all_active:
             sid = ev["segment_id"]

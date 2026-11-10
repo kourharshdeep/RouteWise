@@ -90,7 +90,7 @@ def test_cache_invalidation_on_risk_change(tmp_path: Path, set_live_mode):
 
 def test_cache_invalidation_on_hazard_event_change(tmp_path: Path, set_live_mode):
     """Proves that simulating and clearing hazard events is reflected in the very next journey plan."""
-    set_live_mode("live")
+    set_live_mode("replay")
     test_db = tmp_path / "hazard_inval.db"
     old_path = weather_storage.db_path
     try:
@@ -105,7 +105,7 @@ def test_cache_invalidation_on_hazard_event_change(tmp_path: Path, set_live_mode
 
         # Seed low risk
         records = [
-            (s, target_date, 0.05, "Low", "OK", 0, "1.0.0", "SHA", target_date, "2026-11-09T00:00:00Z")
+            (s, target_date, 0.05, "Low", "OK", 0, "1.0.0", "SHA", target_date, "2026-11-09T00:00:00Z", "replay")
             for s in all_segs
         ]
         with sqlite3.connect(test_db) as conn:
@@ -113,8 +113,8 @@ def test_cache_invalidation_on_hazard_event_change(tmp_path: Path, set_live_mode
                 """
                 INSERT OR REPLACE INTO live_risk (
                     segment_id, as_of, score, tier, status, is_stale,
-                    model_version, checkpoint_sha256, weather_window_end, computed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    model_version, checkpoint_sha256, weather_window_end, computed_at, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 records,
             )
@@ -271,7 +271,7 @@ def test_static_caching_and_latency_bound():
 
 def test_hazard_event_cache_respects_expiration_without_mutation(tmp_path: Path, set_live_mode):
     """Proves the hazard-event cache auto-invalidates and drops expired events when expires_at passes without DB mutation."""
-    set_live_mode("live")
+    set_live_mode("replay")
     from datetime import datetime, timedelta, timezone
 
     test_db = tmp_path / "hazard_exp.db"
@@ -288,7 +288,7 @@ def test_hazard_event_cache_respects_expiration_without_mutation(tmp_path: Path,
 
         # 1. Seed low risk across all segments
         records = [
-            (s, target_date, 0.05, "Low", "OK", 0, "1.0.0", "SHA", target_date, "2026-11-09T00:00:00Z")
+            (s, target_date, 0.05, "Low", "OK", 0, "1.0.0", "SHA", target_date, "2026-11-09T00:00:00Z", "replay")
             for s in all_segs
         ]
         with sqlite3.connect(test_db) as conn:
@@ -296,8 +296,8 @@ def test_hazard_event_cache_respects_expiration_without_mutation(tmp_path: Path,
                 """
                 INSERT OR REPLACE INTO live_risk (
                     segment_id, as_of, score, tier, status, is_stale,
-                    model_version, checkpoint_sha256, weather_window_end, computed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    model_version, checkpoint_sha256, weather_window_end, computed_at, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 records,
             )

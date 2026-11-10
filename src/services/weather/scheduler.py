@@ -32,12 +32,16 @@ class WeatherScheduler:
         storage: Optional[WeatherStorage] = None,
         provider: Optional[WeatherProvider] = None,
         clock: Optional[Callable[[], datetime]] = None,
+        max_cluster_retries: int = 3,
+        cluster_timeout_seconds: float = 10.0,
     ) -> None:
         self.storage = storage or weather_storage
         self.provider = provider
         self.mode = settings.live_mode
         self.interval_minutes = settings.live_weather_interval_minutes
         self.clock = clock or (lambda: datetime.now(timezone.utc))
+        self.max_cluster_retries = max_cluster_retries
+        self.cluster_timeout_seconds = cluster_timeout_seconds
 
         self._task: Optional[asyncio.Task] = None
         self._running: bool = False
@@ -51,7 +55,11 @@ class WeatherScheduler:
         if self.provider is not None:
             return self.provider
         if self.mode == "live":
-            return OpenMeteoProvider(storage=self.storage)
+            return OpenMeteoProvider(
+                storage=self.storage,
+                max_retries=self.max_cluster_retries,
+                timeout_seconds=self.cluster_timeout_seconds,
+            )
         elif self.mode == "replay":
             return ReplayProvider()
         else:

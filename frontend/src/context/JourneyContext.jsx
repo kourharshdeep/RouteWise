@@ -6,7 +6,7 @@ const JourneyContext = createContext(null);
 
 export function JourneyProvider({ children }) {
   const [vehicleType, setVehicleType] = useState(
-    () => localStorage.getItem('routewise_vehicle') || 'Car'
+    () => (typeof localStorage !== 'undefined' ? localStorage.getItem('routewise_vehicle') : null) || 'Car'
   );
   const [origin, setOrigin] = useState('Ramban');
   const [destination, setDestination] = useState('Banihal');

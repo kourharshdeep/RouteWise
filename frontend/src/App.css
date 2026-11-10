@@ -4536,14 +4536,45 @@ body,
 
 .live-connection-indicator.connected {
   background: var(--success-bg);
-  color: var(--success);
+  color: var(--success-text, var(--success));
   border: 1px solid var(--success-border);
 }
 
-.live-connection-indicator.lost {
+.live-connection-indicator.lost,
+.live-connection-indicator.offline {
   background: var(--danger-bg);
-  color: var(--danger);
+  color: var(--danger-text, var(--danger));
   border: 1px solid var(--danger-border);
+}
+
+.live-connection-indicator.reconnecting {
+  background: var(--warning-bg);
+  color: var(--warning-text, var(--warning));
+  border: 1px solid var(--warning-border);
+}
+
+.live-connection-indicator.polling {
+  background: var(--info-bg);
+  color: var(--info-text, var(--info));
+  border: 1px solid var(--info-border);
+}
+
+.spin-slow {
+  animation: spin 3s linear infinite;
+}
+
+.planner-auto-refresh-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--info-bg);
+  color: var(--info-text, var(--info));
+  border: 1px solid var(--info-border);
+  margin-top: 8px;
 }
 
 .live-connection-lost-banner {
@@ -4873,4 +4904,89 @@ body,
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+
+/* Task 3c: Planner Mode & Live Schedule Styles */
+.retrospective-banner.live-banner-style {
+  background: var(--info-bg);
+  border-color: var(--info-border);
+  color: var(--info-text);
+}
+
+.retrospective-banner.replay-banner-style {
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+}
+
+.planner-readonly-date-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.planner-readonly-date {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planner-date-value {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+}
+
+.planner-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.planner-badge-live {
+  background: var(--info-bg);
+  color: var(--info-text);
+  border: 1px solid var(--info-border);
+}
+
+.planner-badge-replay {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  border: 1px solid var(--warning-border);
+}
+
+.planner-badge-historical {
+  background: var(--bg-surface-raised);
+  color: var(--text-muted);
+  border: 1px solid var(--border-default);
+}
+
+.planner-window-end-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.planner-experimental-note {
+  font-size: 11px;
+  color: var(--warning-text);
+  font-weight: 500;
+}
+
+.departure-daily-help {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.3;
 }

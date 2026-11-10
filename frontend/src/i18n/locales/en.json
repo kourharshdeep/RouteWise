@@ -174,7 +174,9 @@
     "incomplete_data_title": "Incomplete Hazard Assessment Notice",
     "incomplete_data_notice": "{{count}} segment(s) on this route lack precomputed ST-GNN risk evaluations. Because missing data is never certified as safe, the overall route risk is designated as Unknown.",
     "assumed_speed_label": "Estimated Transit Time (Assumed Speed)",
-    "date_out_of_range": "Observation date is outside the supported historical window ({{minDate}} to {{maxDate}})."
+    "date_out_of_range": "Observation date is outside the supported historical window ({{minDate}} to {{maxDate}}).",
+    "plan_auto_refreshed": "Plan auto-refreshed at {{time}}",
+    "recommendation_changed_notice": "Recommendation changed from {{oldRec}} to {{newRec}} following live telemetry update"
   },
   "live": {
     "toggle_label": "Operational Mode",
@@ -205,7 +207,13 @@
     "aria_unknown_telemetry": "Unknown / Missing Telemetry",
     "aria_high_hazard": "High Hazard (≥0.35)",
     "aria_elevated_hazard": "Elevated Hazard (0.10–0.35)",
-    "aria_baseline_hazard": "Baseline Hazard (<0.10)"
+    "aria_baseline_hazard": "Baseline Hazard (<0.10)",
+    "conn_connected": "Connected (Real-time Stream)",
+    "conn_reconnecting": "Reconnecting...",
+    "conn_polling": "Polling Fallback",
+    "conn_offline": "Offline",
+    "conn_data_may_be_outdated": "Connection interrupted: telemetry may be out of date",
+    "conn_last_successful": "Last successful update: {{time}}"
   },
   "routing": {
     "recommendation_hold": "HOLD",
@@ -235,5 +243,33 @@
     "scenario_title": "Multi-Day Storm Scenario",
     "advance_phase": "Advance Storm Phase",
     "reset_baseline": "Reset to Baseline"
+  },
+  "error_boundary": {
+    "title": "Something went wrong",
+    "message": "An unexpected error occurred while rendering the dashboard.",
+    "reload": "Reload Application"
+  },
+  "planner": {
+    "live_badge": "Live Operational Advisory • Experimental - not validated",
+    "replay_badge": "REPLAY / SIMULATED SCENARIO",
+    "historical_badge": "Historical Reanalysis",
+    "notice_live_title": "Single-Path Corridor Topology & Operational Live Advisory Notice:",
+    "notice_replay_title": "Corridor Topology & Simulated Replay Scenario Notice:",
+    "notice_historical_title": "Single-Path Corridor Topology & Retrospective Analysis Notice:",
+    "linear_topology_notice": "The NH-44 Ramban–Banihal section is a single continuous linear mountain highway; topological alternative paths (such as parallel bypasses) do not exist within this corridor road graph. Consequently, fastest and safest routes follow the identical physical sequence of segments.",
+    "vehicle_type_label": "Vehicle type:",
+    "vehicle_type_notice": "Configures speed thresholds and hazard vulnerability advisories, but does not alter physical highway geometry.",
+    "departure_time_label": "Departure time:",
+    "departure_time_notice_live": "Calibrates estimated transit times. ST-GNN live advisories reflect daily relative-risk indices from complete weather days (not hourly live changes); experimental telemetry.",
+    "departure_time_notice_replay": "Calibrates simulated travel times across historical playback scenarios.",
+    "departure_time_notice_historical": "Calibrates estimated arrival times, but daily retrospective ST-GNN risk predictions do not change by hour.",
+    "departure_help_live": "Advisory reflects daily relative risk from complete weather days (not hourly). Departure time calibrates transit times.",
+    "schedule_title_live": "Travel Schedule (Live Advisory)",
+    "schedule_title_replay": "Travel Schedule (Simulated Replay)",
+    "schedule_title_historical": "Travel Schedule & Benchmark Timing",
+    "evaluation_date": "Journey Evaluation Date:",
+    "weather_window_through": "Weather window through",
+    "experimental_warning": "Experimental - not validated for life-safety",
+    "historical_benchmarks": "Historical Benchmark Spells:"
   }
 }

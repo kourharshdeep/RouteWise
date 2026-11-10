@@ -4,7 +4,7 @@ import { initReactI18next } from 'react-i18next';
 import en from './locales/en.json';
 import hi from './locales/hi.json';
 
-const savedLang = localStorage.getItem('routewise_lang') || 'en';
+const savedLang = typeof localStorage !== 'undefined' ? localStorage.getItem('routewise_lang') || 'en' : 'en';
 
 i18n
   .use(initReactI18next)
@@ -22,7 +22,7 @@ i18n
 
 export function changeLanguage(lang) {
   i18n.changeLanguage(lang);
-  localStorage.setItem('routewise_lang', lang);
+  if (typeof localStorage !== 'undefined') localStorage.setItem('routewise_lang', lang);
 }
 
 export default i18n;

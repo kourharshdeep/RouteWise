@@ -1,8 +1,10 @@
 import React from 'react';
 import { ShieldAlert, Info } from 'lucide-react';
+import { normalizeRiskSummary } from '../services/riskSummaryHelper';
 
-export default function RiskSummaryCard({ summary, metadata }) {
-  if (!summary) return null;
+export default function RiskSummaryCard({ summary: rawSummary, metadata }) {
+  if (!rawSummary) return null;
+  const summary = normalizeRiskSummary(rawSummary);
 
   return (
     <div className="card">

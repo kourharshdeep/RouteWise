@@ -8,6 +8,16 @@ import {
   getModeDisplayInfo,
   getSegmentAccessibilityCue,
 } from '../src/services/liveModeHelper.js';
+import {
+  RESILIENCE_CONFIG,
+  calculateBackoffDelay,
+  ConnectionStateMachine,
+  reconcileAlerts,
+  reconcileHazardEvents,
+  shouldRefreshPlanner,
+  hasRecommendationChanged,
+} from '../src/services/connectionResilience.js';
+import { normalizeRiskSummary } from '../src/services/riskSummaryHelper.js';
 
 // ==============================================================================
 // 1. Pending Sync Queue Logic Tests
@@ -580,5 +590,696 @@ describe('Current-Date Live Mode Decision Logic & i18n Completeness (Task 3)', (
 
     const cueLow = getSegmentAccessibilityCue('Low', 'OK', false);
     assert.equal(cueLow.symbol, '○');
+  });
+});
+
+// ==============================================================================
+// 10. Live Connection Resilience & Fallback Decision Logic (Task 3b)
+// ==============================================================================
+describe('Live Connection Resilience & Fallback Decision Logic (Task 3b)', () => {
+  it('calculates exponential backoff with full jitter and caps at 30 seconds', () => {
+    // 1. With max jitter (randomFn = 1.0): backoff matches baseMs * factor^attempt capped at maxMs
+    assert.equal(
+      calculateBackoffDelay({ attempt: 0, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 1.0 }),
+      1000,
+      'Attempt 0 max jitter should be 1000ms'
+    );
+    assert.equal(
+      calculateBackoffDelay({ attempt: 1, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 1.0 }),
+      2000,
+      'Attempt 1 max jitter should be 2000ms'
+    );
+    assert.equal(
+      calculateBackoffDelay({ attempt: 2, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 1.0 }),
+      4000,
+      'Attempt 2 max jitter should be 4000ms'
+    );
+    assert.equal(
+      calculateBackoffDelay({ attempt: 5, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 1.0 }),
+      30000,
+      'Attempt 5 should be capped at 30000ms (not 32000ms)'
+    );
+    assert.equal(
+      calculateBackoffDelay({ attempt: 10, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 1.0 }),
+      30000,
+      'Attempt 10 should be capped at 30000ms'
+    );
+
+    // 2. Upper-half jitter: delay is never below 50% of ceiling [0.5 * ceiling, 1.0 * ceiling]
+    // With partial jitter (randomFn = 0.5): delay is 75% of ceiling (3000ms)
+    assert.equal(
+      calculateBackoffDelay({ attempt: 2, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 0.5 }),
+      3000,
+      'Attempt 2 with 0.5 jitter should be 3000ms (upper half jitter)'
+    );
+    // With minimum jitter (randomFn = 0.0): delay is strictly 50% of ceiling (2000ms)
+    assert.equal(
+      calculateBackoffDelay({ attempt: 2, baseMs: 1000, factor: 2, maxMs: 30000, randomFn: () => 0.0 }),
+      2000,
+      'Attempt 2 with 0.0 jitter must be strictly 50% of ceiling (2000ms)'
+    );
+  });
+
+  it('resets backoff attempt counter after healthy connection threshold (5s)', () => {
+    const sm = new ConnectionStateMachine();
+    // Simulate 2 SSE failures -> state reconnecting, attempt = 2
+    sm.handleSseError({ isOnline: true });
+    sm.handleSseError({ isOnline: true });
+    assert.equal(sm.getConsecutiveFailures(), 2);
+
+    // Simulate healthy connection staying connected
+    sm.handleSseOpen();
+    assert.equal(sm.getState(), 'connected');
+
+    // Before healthy threshold: failures count preserved
+    assert.equal(sm.getConsecutiveFailures(), 2);
+
+    // Simulate 5000ms healthy threshold elapse
+    sm.resetConsecutiveFailures();
+    assert.equal(sm.getConsecutiveFailures(), 0);
+
+    // Next failure starts at attempt 0 (consecutive failures count = 1)
+    const nextErr = sm.handleSseError({ isOnline: true });
+    assert.equal(sm.getConsecutiveFailures(), 1);
+    assert.equal(nextErr.nextState, 'reconnecting');
+    sm.destroy();
+  });
+
+  it('transitions through connected -> reconnecting -> polling -> connected and offline', () => {
+    const sm = new ConnectionStateMachine();
+    assert.equal(sm.getState(), 'connected');
+
+    // Drop 1: Reconnecting
+    const r1 = sm.handleSseError({ isOnline: true });
+    assert.equal(r1.nextState, 'reconnecting');
+    assert.equal(sm.getState(), 'reconnecting');
+
+    // Drop 2: Still Reconnecting
+    const r2 = sm.handleSseError({ isOnline: true });
+    assert.equal(r2.nextState, 'reconnecting');
+
+    // Drop 3: Transitions to Polling fallback
+    const r3 = sm.handleSseError({ isOnline: true });
+    assert.equal(r3.nextState, 'polling');
+    assert.equal(sm.getState(), 'polling');
+
+    // In polling mode, poll error backs off interval
+    const pErr = sm.handlePollError({ isOnline: true });
+    assert.equal(pErr.nextState, 'polling');
+
+    // Offline event transitions immediately to offline
+    const offErr = sm.handleSseError({ isOnline: false });
+    assert.equal(offErr.nextState, 'offline');
+    assert.equal(sm.getState(), 'offline');
+
+    // Online resume returns to reconnecting
+    sm.handleOnlineResume();
+    assert.equal(sm.getState(), 'reconnecting');
+
+    // Success returns to connected
+    sm.handleSuccess();
+    assert.equal(sm.getState(), 'connected');
+    sm.destroy();
+  });
+
+  it('reconciles state idempotently: server status always wins and cleared alerts are removed', () => {
+    // Current alerts in client state (alt_01 was locally acknowledged in UI, alt_02 active)
+    const currentAlerts = [
+      { id: 'alt_01', segment_id: 'seg_010', status: 'acknowledged', acknowledged: true, _clientUiExpanded: true },
+      { id: 'alt_02', segment_id: 'seg_020', status: 'active', acknowledged: false },
+    ];
+
+    // Incoming alerts from server poll: server reset alt_01 back to active! And alt_02 cleared on server!
+    const incomingAlerts = [
+      { id: 'alt_01', segment_id: 'seg_010', status: 'active', acknowledged: false },
+      { id: 'alt_03', segment_id: 'seg_030', status: 'active', acknowledged: false },
+    ];
+
+    const reconciled = reconcileAlerts(currentAlerts, incomingAlerts);
+    assert.equal(reconciled.length, 2, 'Must contain 2 items: alt_01 and alt_03 (cleared alt_02 removed, zero duplicates)');
+    const a1 = reconciled.find((a) => a.id === 'alt_01');
+    assert.equal(a1.status, 'active', 'Server status active must win over local acknowledged');
+    assert.equal(a1.acknowledged, false, 'Server unacknowledged must win over local acknowledged');
+    assert.equal(a1._clientUiExpanded, true, 'Visual-only UI state persists');
+    const a2 = reconciled.find((a) => a.id === 'alt_02');
+    assert.equal(a2, undefined, 'Cleared alert alt_02 must be removed');
+    const a3 = reconciled.find((a) => a.id === 'alt_03');
+    assert.ok(a3, 'New incoming alert alt_03 must be included');
+
+    // Hazard event reconciliation: deduplication and removal of cleared events
+    const currentEvents = [
+      { id: 'evt_01', segment_id: 'seg_005', type: 'landslide', status: 'active' },
+      { id: 'evt_02', segment_id: 'seg_012', type: 'shooting_stones', status: 'active' },
+    ];
+    const incomingEvents = [
+      { id: 'evt_01', segment_id: 'seg_005', type: 'landslide', status: 'active' },
+      { id: 'evt_03', segment_id: 'seg_050', type: 'waterlogging', status: 'active' },
+    ];
+    const reconciledEvents = reconcileHazardEvents(currentEvents, incomingEvents);
+    assert.equal(reconciledEvents.length, 2, 'Cleared event evt_02 removed, new evt_03 added');
+    assert.ok(reconciledEvents.some((e) => e.id === 'evt_01'));
+    assert.ok(reconciledEvents.some((e) => e.id === 'evt_03'));
+    assert.ok(!reconciledEvents.some((e) => e.id === 'evt_02'));
+  });
+
+  it('governs planner auto-refresh qualification, debouncing and storm guards', () => {
+    // 1. Live mode with active plan and tab visible -> should refresh
+    assert.equal(
+      shouldRefreshPlanner({
+        mode: 'live',
+        hasActivePlan: true,
+        isPlanning: false,
+        isTabVisible: true,
+        changeDetected: true,
+      }),
+      true
+    );
+
+    // 2. Historical mode -> NEVER auto-refresh
+    assert.equal(
+      shouldRefreshPlanner({
+        mode: 'historical',
+        hasActivePlan: true,
+        isPlanning: false,
+        isTabVisible: true,
+        changeDetected: true,
+      }),
+      false,
+      'Historical reanalysis must not auto-refresh'
+    );
+
+    // 3. No active plan displayed -> do not auto-refresh
+    assert.equal(
+      shouldRefreshPlanner({
+        mode: 'live',
+        hasActivePlan: false,
+        isPlanning: false,
+        isTabVisible: true,
+        changeDetected: true,
+      }),
+      false
+    );
+
+    // 4. Request already in-flight (storm guard) -> do not trigger concurrent refresh
+    assert.equal(
+      shouldRefreshPlanner({
+        mode: 'live',
+        hasActivePlan: true,
+        isPlanning: true,
+        isTabVisible: true,
+        changeDetected: true,
+      }),
+      false,
+      'Storm guard must prevent concurrent planning requests'
+    );
+
+    // 5. Background tab hidden -> do not refresh while hidden
+    assert.equal(
+      shouldRefreshPlanner({
+        mode: 'live',
+        hasActivePlan: true,
+        isPlanning: false,
+        isTabVisible: false,
+        changeDetected: true,
+      }),
+      false,
+      'Hidden tab must pause refresh'
+    );
+  });
+
+  it('guarantees Task 3b connection resilience and auto-refresh i18n keys exist in both EN and HI catalogs', () => {
+    const requiredLiveKeys = [
+      'conn_connected',
+      'conn_reconnecting',
+      'conn_polling',
+      'conn_offline',
+      'conn_data_may_be_outdated',
+      'conn_last_successful',
+    ];
+
+    for (const key of requiredLiveKeys) {
+      assert.ok(enTranslations.live?.[key], `EN missing live key: ${key}`);
+      assert.ok(hiTranslations.live?.[key], `HI missing live key: ${key}`);
+    }
+
+    assert.equal(enTranslations.live.conn_connected, 'Connected (Real-time Stream)');
+    assert.equal(hiTranslations.live.conn_connected, 'कनेक्टेड (रियल-टाइम स्ट्रीम)');
+
+    assert.equal(enTranslations.live.conn_reconnecting, 'Reconnecting...');
+    assert.equal(hiTranslations.live.conn_reconnecting, 'पुनः कनेक्ट हो रहा है...');
+
+    assert.equal(enTranslations.live.conn_polling, 'Polling Fallback');
+    assert.equal(hiTranslations.live.conn_polling, 'पॉलिंग फ़ॉलबैक');
+
+    assert.equal(enTranslations.live.conn_offline, 'Offline');
+    assert.equal(hiTranslations.live.conn_offline, 'ऑफ़लाइन');
+
+    assert.equal(enTranslations.live.conn_data_may_be_outdated, 'Connection interrupted: telemetry may be out of date');
+    assert.equal(hiTranslations.live.conn_data_may_be_outdated, 'कनेक्शन बाधित: टेलीमेट्री पुरानी हो सकती है');
+
+    assert.equal(enTranslations.live.conn_last_successful, 'Last successful update: {{time}}');
+    assert.equal(hiTranslations.live.conn_last_successful, 'अंतिम सफल अपडेट: {{time}}');
+
+    assert.ok(enTranslations.journey?.plan_auto_refreshed, 'EN missing journey.plan_auto_refreshed');
+    assert.ok(hiTranslations.journey?.plan_auto_refreshed, 'HI missing journey.plan_auto_refreshed');
+
+    assert.equal(enTranslations.journey.plan_auto_refreshed, 'Plan auto-refreshed at {{time}}');
+    assert.equal(hiTranslations.journey.plan_auto_refreshed, 'योजना {{time}} पर स्वतः रीफ़्रेश हुई');
+  });
+});
+
+
+// ==============================================================================
+// 11. Live Operational Integration & Safety Hardening
+// ==============================================================================
+describe('Live Operational Integration & Safety Hardening', () => {
+  it('normalizes risk summary counts for both live and historical schema shapes', () => {
+    // 1. Live format: keys {Low, Medium, High, UNKNOWN}
+    const liveShape = {
+      Low: 140,
+      Medium: 10,
+      High: 1,
+      UNKNOWN: 0,
+    };
+    const normFromLive = normalizeRiskSummary(liveShape);
+    assert.equal(normFromLive.High, 1);
+    assert.equal(normFromLive.Medium, 10);
+    assert.equal(normFromLive.Low, 140);
+    assert.equal(normFromLive.UNKNOWN, 0);
+    assert.equal(normFromLive.high_risk_count, 1);
+    assert.equal(normFromLive.medium_risk_count, 10);
+    assert.equal(normFromLive.low_risk_count, 140);
+    assert.equal(normFromLive.unknown_count, 0);
+    assert.equal(normFromLive.total, 151);
+
+    // 2. Historical format: snake_case keys {high_risk_count, ...}
+    const histShape = {
+      high_risk_count: 3,
+      medium_risk_count: 12,
+      low_risk_count: 136,
+      unknown_count: 0,
+    };
+    const normFromHist = normalizeRiskSummary(histShape);
+    assert.equal(normFromHist.High, 3);
+    assert.equal(normFromHist.Medium, 12);
+    assert.equal(normFromHist.Low, 136);
+    assert.equal(normFromHist.UNKNOWN, 0);
+    assert.equal(normFromHist.high_risk_count, 3);
+    assert.equal(normFromHist.medium_risk_count, 12);
+    assert.equal(normFromHist.low_risk_count, 136);
+    assert.equal(normFromHist.unknown_count, 0);
+    assert.equal(normFromHist.total, 151);
+
+    // 3. Null / empty / undefined fallback
+    const normEmpty = normalizeRiskSummary(null);
+    assert.equal(normEmpty.High, 0);
+    assert.equal(normEmpty.Medium, 0);
+    assert.equal(normEmpty.Low, 0);
+    assert.equal(normEmpty.UNKNOWN, 0);
+    assert.equal(normEmpty.high_risk_count, 0);
+    assert.equal(normEmpty.total, 0);
+  });
+
+  it('filters simulated alerts out of live, historical and off client views', () => {
+    const rawAlerts = [
+      { id: 'alert-1', segment_id: 10, is_simulated: false, title: 'Real Rockfall' },
+      { id: 'alert-2', segment_id: 20, is_simulated: true, title: 'Simulated Drill' },
+      { id: 'alert-3', segment_id: 30, is_simulated: 0, title: 'Real Weather Alert' },
+      { id: 'alert-4', segment_id: 40, is_simulated: 1, title: 'Simulated Landslide' },
+    ];
+
+    const filterForMode = (alerts, mode) => {
+      const isReplayMode = mode === 'replay';
+      return alerts.filter((a) => isReplayMode || !a.is_simulated);
+    };
+
+    // Live mode: simulated alerts must be excluded
+    const liveAlerts = filterForMode(rawAlerts, 'live');
+    assert.equal(liveAlerts.length, 2);
+    assert.deepEqual(liveAlerts.map((a) => a.id), ['alert-1', 'alert-3']);
+
+    // Off mode: simulated alerts must be excluded
+    const offAlerts = filterForMode(rawAlerts, 'off');
+    assert.equal(offAlerts.length, 2);
+
+    // Historical mode: simulated alerts must be excluded
+    const histAlerts = filterForMode(rawAlerts, 'historical');
+    assert.equal(histAlerts.length, 2);
+
+    // Replay mode: simulated alerts are included
+    const replayAlerts = filterForMode(rawAlerts, 'replay');
+    assert.equal(replayAlerts.length, 4);
+  });
+
+  it('guarantees ErrorBoundary i18n keys and fallback structure in EN and HI', () => {
+    assert.ok(enTranslations.error_boundary, 'EN missing error_boundary section');
+    assert.ok(hiTranslations.error_boundary, 'HI missing error_boundary section');
+
+    const requiredKeys = ['title', 'message', 'reload'];
+    for (const k of requiredKeys) {
+      assert.ok(enTranslations.error_boundary[k], `EN missing error_boundary.${k}`);
+      assert.ok(hiTranslations.error_boundary[k], `HI missing error_boundary.${k}`);
+    }
+
+    assert.equal(enTranslations.error_boundary.title, 'Something went wrong');
+    assert.equal(hiTranslations.error_boundary.title, 'कुछ गलत हो गया');
+    assert.equal(enTranslations.error_boundary.reload, 'Reload Application');
+    assert.equal(hiTranslations.error_boundary.reload, 'एप्लिकेशन पुनः लोड करें');
+  });
+});
+
+// ==============================================================================
+// 12. Permanent SSR Render Smoke Test & Error Boundary Behaviour (Task 3b-3)
+// ==============================================================================
+describe('Permanent SSR Render Smoke Test & Error Boundary Behaviour (Task 3b-3)', () => {
+  it('detects recommendation change and verifies translated notice keys', () => {
+    assert.equal(hasRecommendationChanged('HOLD', 'PROCEED'), true);
+    assert.equal(hasRecommendationChanged('PROCEED', 'PROCEED_WITH_CAUTION'), true);
+    assert.equal(hasRecommendationChanged('HOLD', 'HOLD'), false);
+    assert.equal(hasRecommendationChanged('hold', 'HOLD'), false);
+    assert.equal(hasRecommendationChanged(null, 'HOLD'), false);
+    assert.equal(hasRecommendationChanged('HOLD', null), false);
+
+    assert.ok(enTranslations.journey?.recommendation_changed_notice, 'EN missing recommendation_changed_notice');
+    assert.ok(hiTranslations.journey?.recommendation_changed_notice, 'HI missing recommendation_changed_notice');
+    assert.ok(enTranslations.journey.recommendation_changed_notice.includes('{{oldRec}}'));
+    assert.ok(enTranslations.journey.recommendation_changed_notice.includes('{{newRec}}'));
+  });
+
+  it('verifies ErrorBoundary catches rendering errors, logs them, and renders translated fallback', async () => {
+    const { createServer } = await import('vite');
+    const React = (await import('react')).default;
+    const { renderToString } = await import('react-dom/server');
+
+    const server = await createServer({
+      root: process.cwd(),
+      server: { middlewareMode: true },
+      appType: 'custom',
+      optimizeDeps: { noDiscovery: true },
+    });
+
+    try {
+      const ErrorBoundary = (await server.ssrLoadModule('./src/components/ErrorBoundary.jsx')).default;
+
+      // 1. Error state generation via static getDerivedStateFromError
+      const sampleErr = new Error('Test component render explosion');
+      const derived = ErrorBoundary.getDerivedStateFromError(sampleErr);
+      assert.equal(derived.hasError, true);
+      assert.equal(derived.error, sampleErr);
+
+      // 2. Fallback rendering in error state
+      const instance = new ErrorBoundary({});
+      instance.state = derived;
+      const renderedHtml = renderToString(instance.render());
+      assert.ok(renderedHtml.includes('Something went wrong'), 'Fallback must contain title');
+      assert.ok(renderedHtml.includes('Reload Application'), 'Fallback must contain reload button');
+      assert.ok(renderedHtml.includes('An unexpected error occurred'), 'Fallback must contain error message');
+
+      // 3. Verify componentDidCatch logs to console.error
+      const origError = console.error;
+      let loggedError = null;
+      console.error = (...args) => { loggedError = args; };
+      try {
+        instance.componentDidCatch(sampleErr, { componentStack: 'in CrashingChild' });
+        assert.ok(loggedError !== null, 'componentDidCatch must log to console.error');
+      } finally {
+        console.error = origError;
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('SSR mounts Overview, LiveBanner, ControlHeader, and CorridorStrip across all 4 modes with real and null summaries', async () => {
+    const { createServer } = await import('vite');
+    const React = (await import('react')).default;
+    const { renderToString } = await import('react-dom/server');
+
+    const server = await createServer({
+      root: process.cwd(),
+      server: { middlewareMode: true },
+      appType: 'custom',
+      optimizeDeps: { noDiscovery: true },
+    });
+
+    try {
+      const Overview = (await server.ssrLoadModule('./src/components/Overview.jsx')).default;
+      const LiveBanner = (await server.ssrLoadModule('./src/components/LiveBanner.jsx')).default;
+      const ControlHeader = (await server.ssrLoadModule('./src/components/ControlHeader.jsx')).default;
+      const CorridorStrip = (await server.ssrLoadModule('./src/components/CorridorStrip.jsx')).default;
+
+      const modes = ['historical', 'live', 'replay', 'off'];
+      const summaryShapes = [
+        { Low: 140, Medium: 10, High: 1, UNKNOWN: 0 },
+        null,
+      ];
+
+      for (const mode of modes) {
+        for (const summary of summaryShapes) {
+          const liveStatus = {
+            mode: mode === 'historical' ? 'live' : mode,
+            as_of: '2026-11-10T12:00:00Z',
+            data_age_hours: 1.2,
+            latest_fetch: '2026-11-10T12:00:00Z',
+            unknown_count: 0,
+            active_hazard_events: 1,
+            active_alerts: 1,
+          };
+          const riskData = {
+            mode: mode === 'historical' ? 'live' : mode,
+            as_of: '2026-11-10T12:00:00Z',
+            summary,
+            operational_status: 'NORMAL',
+            segments: Array.from({ length: 151 }, (_, i) => ({
+              segment_id: `seg_${i + 1}`,
+              risk_score: 0.05,
+              risk_tier: 'Low',
+              status: 'OK',
+              operational_status: 'OPEN',
+            })),
+          };
+          const predictions = riskData.segments;
+
+          // Render LiveBanner
+          const lb = renderToString(React.createElement(LiveBanner, {
+            mode,
+            liveStatus,
+            connectionStatus: 'connected',
+          }));
+          assert.ok(lb.length > 0, `LiveBanner must render in mode ${mode}`);
+
+          // Render ControlHeader
+          const ch = renderToString(React.createElement(ControlHeader, {
+            mode,
+            setMode: () => {},
+            selectedDate: '2026-11-10',
+            setSelectedDate: () => {},
+            dates: ['2026-11-10'],
+            liveStatus,
+            liveRisk: riskData,
+          }));
+          assert.ok(ch.length > 0, `ControlHeader must render in mode ${mode}`);
+
+          // Render CorridorStrip
+          const cs = renderToString(React.createElement(CorridorStrip, {
+            predictions,
+            selectedSegment: null,
+            onSelectSegment: () => {},
+            mode,
+            liveRisk: riskData,
+          }));
+          assert.ok(cs.length > 0, `CorridorStrip must render in mode ${mode}`);
+
+          // Render Overview
+          const ov = renderToString(React.createElement(Overview, {
+            mode,
+            liveStatus,
+            riskData,
+            predictions,
+            selectedSegment: null,
+            onSelectSegment: () => {},
+            onNavigate: () => {},
+          }));
+          assert.ok(ov.length > 0, `Overview must render in mode ${mode}`);
+        }
+      }
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+
+// ==============================================================================
+// 13. Journey Planner Mode & Schedule Behaviour (Task 3c)
+// ==============================================================================
+describe('Journey Planner Mode & Schedule Behaviour (Task 3c)', () => {
+  it('governs JourneyPlanner mode configuration across all 4 modes (live, replay, historical, off)', async () => {
+    const { getPlannerModeConfig } = await import('../src/services/plannerModeHelper.js');
+
+    // 1. Live mode
+    const liveConfig = getPlannerModeConfig({
+      mode: 'live',
+      liveAsOf: '2026-11-10',
+      weatherWindowEnd: '2026-11-10T12:00:00Z',
+    });
+    assert.equal(liveConfig.isLive, true);
+    assert.equal(liveConfig.isReplay, false);
+    assert.equal(liveConfig.isHistorical, false);
+    assert.equal(liveConfig.isDateEditable, false, 'Live mode date must be read-only');
+    assert.equal(liveConfig.showBenchmarkButtons, false, 'Benchmark buttons must be hidden in live mode');
+    assert.equal(liveConfig.evaluationDate, '2026-11-10');
+    assert.equal(liveConfig.weatherWindowEnd, '2026-11-10T12:00:00Z');
+    assert.equal(liveConfig.statusBadgeClass, 'planner-badge-live');
+    assert.equal(liveConfig.isExperimental, true);
+    assert.equal(liveConfig.departureHelpKey, 'planner.departure_help_live');
+
+    // 2. Replay mode
+    const replayConfig = getPlannerModeConfig({
+      mode: 'replay',
+      replayDate: '2023-07-09',
+    });
+    assert.equal(replayConfig.isLive, false);
+    assert.equal(replayConfig.isReplay, true);
+    assert.equal(replayConfig.isHistorical, false);
+    assert.equal(replayConfig.isDateEditable, false, 'Replay date must be read-only');
+    assert.equal(replayConfig.showBenchmarkButtons, false, 'Benchmark buttons must be hidden in replay mode');
+    assert.equal(replayConfig.evaluationDate, '2023-07-09');
+    assert.equal(replayConfig.statusBadgeClass, 'planner-badge-replay');
+    assert.equal(replayConfig.statusBadgeText, 'REPLAY / SIMULATED SCENARIO');
+    assert.equal(replayConfig.isExperimental, false);
+
+    // 3. Historical mode
+    const histConfig = getPlannerModeConfig({ mode: 'historical' });
+    assert.equal(histConfig.isLive, false);
+    assert.equal(histConfig.isReplay, false);
+    assert.equal(histConfig.isHistorical, true);
+    assert.equal(histConfig.isDateEditable, true, 'Historical mode date must be editable');
+    assert.equal(histConfig.showBenchmarkButtons, true, 'Benchmark buttons must be shown in historical mode');
+    assert.equal(histConfig.statusBadgeClass, 'planner-badge-historical');
+
+    // 4. Off mode (treated as historical safe fallback)
+    const offConfig = getPlannerModeConfig({ mode: 'off' });
+    assert.equal(offConfig.isLive, false);
+    assert.equal(offConfig.isReplay, false);
+    assert.equal(offConfig.isHistorical, true);
+    assert.equal(offConfig.isDateEditable, true);
+    assert.equal(offConfig.showBenchmarkButtons, true);
+  });
+
+  it('verifies departure time defaulting and advisory validity check', async () => {
+    const { getDefaultDepartureTime, isTimeWithinAdvisoryValidity } = await import(
+      '../src/services/plannerModeHelper.js'
+    );
+
+    const morningDate = new Date(2026, 10, 10, 8, 5, 0);
+    assert.equal(getDefaultDepartureTime(morningDate), '08:05');
+
+    const eveningDate = new Date(2026, 10, 10, 19, 45, 0);
+    assert.equal(getDefaultDepartureTime(eveningDate), '19:45');
+
+    assert.equal(isTimeWithinAdvisoryValidity('00:00'), true);
+    assert.equal(isTimeWithinAdvisoryValidity('08:30'), true);
+    assert.equal(isTimeWithinAdvisoryValidity('23:59'), true);
+    assert.equal(isTimeWithinAdvisoryValidity('24:00'), false);
+    assert.equal(isTimeWithinAdvisoryValidity('8:30'), false);
+    assert.equal(isTimeWithinAdvisoryValidity('invalid'), false);
+    assert.equal(isTimeWithinAdvisoryValidity(null), false);
+  });
+
+  it('guarantees Task 3c planner i18n keys exist and match between EN and HI', () => {
+    const expectedKeys = [
+      'live_badge',
+      'replay_badge',
+      'historical_badge',
+      'notice_live_title',
+      'notice_replay_title',
+      'notice_historical_title',
+      'linear_topology_notice',
+      'vehicle_type_label',
+      'vehicle_type_notice',
+      'departure_time_label',
+      'departure_time_notice_live',
+      'departure_time_notice_replay',
+      'departure_time_notice_historical',
+      'departure_help_live',
+      'schedule_title_live',
+      'schedule_title_replay',
+      'schedule_title_historical',
+      'evaluation_date',
+      'weather_window_through',
+      'experimental_warning',
+      'historical_benchmarks',
+    ];
+
+    for (const k of expectedKeys) {
+      assert.ok(enTranslations.planner?.[k], `EN missing planner key: ${k}`);
+      assert.ok(hiTranslations.planner?.[k], `HI missing planner key: ${k}`);
+      assert.notEqual(enTranslations.planner[k], hiTranslations.planner[k], `Key ${k} should be localized in HI`);
+    }
+
+    assert.equal(enTranslations.planner.live_badge, 'Live Operational Advisory \u2022 Experimental - not validated');
+    assert.equal(hiTranslations.planner.live_badge, '\u0932\u093e\u0907\u0935 \u092a\u0930\u093f\u091a\u093e\u0932\u0928 \u092a\u0930\u093e\u092e\u0930\u094d\u0936 \u2022 \u092a\u094d\u0930\u093e\u092f\u094b\u0917\u093f\u0915 - \u0917\u0948\u0930-\u0938\u0924\u094d\u092f\u093e\u092a\u093f\u0924');
+    assert.equal(enTranslations.planner.replay_badge, 'REPLAY / SIMULATED SCENARIO');
+    assert.equal(hiTranslations.planner.replay_badge, '\u0930\u0940\u092a\u094d\u0932\u0947 / \u0938\u093f\u092e\u094d\u092f\u0941\u0932\u0947\u091f\u0947\u0921 \u092a\u0930\u093f\u0926\u0943\u0936\u094d\u092f');
+  });
+
+  it('SSR mounts JourneyPlanner in all 4 modes (live, replay, historical, off)', async () => {
+    const React = (await import('react')).default;
+    const { renderToString } = await import('react-dom/server');
+    const { createServer } = await import('vite');
+
+    const server = await createServer({
+      root: process.cwd(),
+      appType: 'custom',
+      server: { middlewareMode: true },
+      optimizeDeps: { noDiscovery: true },
+    });
+
+    try {
+      const JourneyPlanner = (await server.ssrLoadModule('./src/components/JourneyPlanner.jsx')).default;
+      const { JourneyProvider } = await server.ssrLoadModule('./src/context/JourneyContext.jsx');
+
+      const modes = ['historical', 'live', 'replay', 'off'];
+      const riskData = {
+        mode: 'live',
+        as_of: '2026-11-10',
+        weather_window_end: '2026-11-10T12:00:00Z',
+        computed_at: '2026-11-10T12:05:00Z',
+        segments: [],
+      };
+
+      for (const mode of modes) {
+        const rendered = renderToString(
+          React.createElement(
+            JourneyProvider,
+            null,
+            React.createElement(JourneyPlanner, {
+              mode,
+              riskData,
+              lastRouteUpdate: null,
+            })
+          )
+        );
+
+        assert.ok(rendered.length > 0, `JourneyPlanner must render in mode ${mode}`);
+
+        if (mode === 'live') {
+          assert.ok(rendered.includes('planner-readonly-date'), 'Live mode must render readonly date');
+          assert.ok(rendered.includes('Live Operational Advisory'), 'Live mode must render live badge');
+          assert.ok(!rendered.includes('Historical Benchmark Spells:'), 'Live mode must NOT render benchmark chips');
+        } else if (mode === 'replay') {
+          assert.ok(rendered.includes('planner-readonly-date'), 'Replay mode must render readonly date');
+          assert.ok(rendered.includes('REPLAY / SIMULATED SCENARIO'), 'Replay mode must render replay badge');
+          assert.ok(!rendered.includes('Historical Benchmark Spells:'), 'Replay mode must NOT render benchmark chips');
+        } else {
+          // historical and off
+          assert.ok(rendered.includes('type="date"'), 'Historical mode must render date input');
+          assert.ok(rendered.includes('Historical Benchmark Spells:'), 'Historical mode must render benchmark chips');
+        }
+      }
+    } finally {
+      await server.close();
+    }
   });
 });

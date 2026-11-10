@@ -18,6 +18,7 @@ export default function LiveBanner({
   onModeChange,
   liveStatus,
   connectionStatus = "connected",
+  lastSuccessfulUpdate = null,
   onRefresh,
   isLoading = false,
 }) {
@@ -190,21 +191,78 @@ export default function LiveBanner({
             </div>
           )}
 
-          {/* SSE Stream Connection Indicator */}
+          {/* Connection Interrupted Warning & Last Successful Timestamp */}
+          {connectionStatus !== "connected" && (
+            <>
+              <div
+                className="live-banner-item"
+                style={{
+                  color: "var(--warning-text, var(--warning))",
+                  background: "var(--warning-bg)",
+                  border: "1px solid var(--warning-border)",
+                  borderRadius: "4px",
+                  padding: "2px 6px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+                role="alert"
+              >
+                <AlertTriangle size={12} aria-hidden="true" />
+                <span>{t("live.conn_data_may_be_outdated")}</span>
+              </div>
+              {lastSuccessfulUpdate && (
+                <div
+                  className="live-banner-item"
+                  title={lastSuccessfulUpdate}
+                >
+                  <Clock size={12} style={{ color: "var(--text-muted)" }} aria-hidden="true" />
+                  <span>
+                    {t("live.conn_last_successful", {
+                      time:
+                        lastSuccessfulUpdate.length >= 19
+                          ? lastSuccessfulUpdate.slice(11, 19) + " UTC"
+                          : lastSuccessfulUpdate,
+                    })}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Connection State Indicator (connected | reconnecting | polling | offline) */}
           <div
             className={`live-connection-indicator ${
-              connectionStatus === "connected" ? "connected" : "lost"
+              connectionStatus === "connected"
+                ? "connected"
+                : connectionStatus === "reconnecting"
+                ? "reconnecting"
+                : connectionStatus === "polling"
+                ? "polling"
+                : "offline"
             }`}
           >
             {connectionStatus === "connected" ? (
               <>
                 <Wifi size={12} aria-hidden="true" />
-                <span>{t("live.connection_connected")}</span>
+                <span>{t("live.conn_connected")}</span>
+              </>
+            ) : connectionStatus === "reconnecting" ? (
+              <>
+                <RefreshCw size={12} className="spin-slow" aria-hidden="true" />
+                <span>{t("live.conn_reconnecting")}</span>
+              </>
+            ) : connectionStatus === "polling" ? (
+              <>
+                <Activity size={12} aria-hidden="true" />
+                <span>{t("live.conn_polling")}</span>
               </>
             ) : (
               <>
                 <WifiOff size={12} aria-hidden="true" />
-                <span>{t("live.connection_lost")}</span>
+                <span>{t("live.conn_offline")}</span>
               </>
             )}
           </div>
