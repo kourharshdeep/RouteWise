@@ -31,6 +31,9 @@ logger = logging.getLogger("live_risk_service")
 # Expected SHA-256 checksum of stgnn_best.pt
 EXPECTED_CHECKPOINT_SHA256 = "68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F963D335054006E"
 
+# Authoritative data freshness threshold across RouteWise (24 hours)
+MAX_DATA_AGE_HOURS: float = 24.0
+
 
 class LiveRiskComputationDisabledError(RuntimeError):
     """Raised when live-risk computation is disabled by configuration (e.g. ROUTEWISE_LIVE_MODE is 'off')."""
@@ -42,6 +45,7 @@ class LiveRiskService:
 
     # Missing-data threshold matching src/models/inference.py (0.25 = 25%)
     MISSING_DATA_THRESHOLD: float = 0.25
+    MAX_DATA_AGE_HOURS: float = MAX_DATA_AGE_HOURS
 
     def __init__(
         self,
@@ -126,6 +130,7 @@ class LiveRiskService:
                         checkpoint_sha256 TEXT NOT NULL,
                         weather_window_end TEXT NOT NULL,
                         computed_at TEXT NOT NULL,
+                        source TEXT NOT NULL DEFAULT 'open-meteo',
                         UNIQUE(segment_id, as_of)
                     );
                     """
@@ -134,6 +139,15 @@ class LiveRiskService:
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_seg_as_of ON live_risk(segment_id, as_of);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_as_of_seg ON live_risk(as_of, segment_id);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_computed ON live_risk(computed_at);")
+
+                # Additive idempotent migration for legacy databases lacking weather_window_end or source
+                columns = [row[1] for row in conn.execute("PRAGMA table_info(live_risk);").fetchall()]
+                if "weather_window_end" not in columns:
+                    conn.execute("ALTER TABLE live_risk ADD COLUMN weather_window_end TEXT;")
+                if "source" not in columns:
+                    conn.execute("ALTER TABLE live_risk ADD COLUMN source TEXT NOT NULL DEFAULT 'open-meteo';")
+
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_live_risk_source_as_of ON live_risk(source, as_of);")
         self._initialized_dbs.add(db_path)
 
     def prune_old_records(self, max_history_days: int = 7, eval_time: Optional[datetime] = None) -> int:
@@ -154,22 +168,14 @@ class LiveRiskService:
         as_of: Optional[str] = None,
         eval_time: Optional[datetime] = None,
         source: Optional[str] = None,
+        weather_window_end: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Evaluates ST-GNN risk predictions from weather_observation and persists them."""
         self.init_db()
         engine = self._get_engine()
         static_df = self._get_static_df()
 
-        # 1. Determine evaluation time and target date
-        wall_clock = eval_time or datetime.now(timezone.utc)
-        if as_of is None:
-            # Prefer the latest available observation date in the runtime DB
-            latest_db_date = self.storage.get_latest_observation_date()
-            target_date = latest_db_date or wall_clock.strftime("%Y-%m-%d")
-        else:
-            target_date = as_of
-
-        # 2. Extract 7-day lookback window from weather_observation
+        # 1. Determine source filter first
         # Prefer specified source, else 'replay' if replay mode, 'open-meteo' if live mode
         if source is not None:
             source_filter = source
@@ -182,13 +188,59 @@ class LiveRiskService:
                 "Live-risk computation is disabled by configuration (ROUTEWISE_LIVE_MODE is 'off')."
             )
 
-        target_dt = pd.to_datetime(target_date)
+        # 2. Determine evaluation time (UTC), advisory target date (as_of), and weather lookback window end
+        raw_clock = eval_time or datetime.now(timezone.utc)
+        if raw_clock.tzinfo is None:
+            wall_clock = raw_clock.replace(tzinfo=timezone.utc)
+        else:
+            wall_clock = raw_clock.astimezone(timezone.utc)
+        today_utc = wall_clock.date()
+        yesterday_utc = today_utc - timedelta(days=1)
+
+        if weather_window_end is not None:
+            win_end = weather_window_end
+            target_as_of = as_of or (pd.to_datetime(win_end) + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif as_of is not None:
+            target_as_of = as_of
+            win_end = as_of
+        else:
+            if source_filter == "open-meteo" or settings.live_mode == "live":
+                target_as_of = today_utc.strftime("%Y-%m-%d")
+                # In live mode: today's ongoing UTC observations are incomplete. Lookback window ends on yesterday UTC
+                win_end = yesterday_utc.strftime("%Y-%m-%d")
+            else:
+                # In replay mode: use latest available date in DB for the replay source
+                latest_db_date = self.storage.get_latest_observation_date(source=source_filter)
+                if not latest_db_date:
+                    logger.warning("Replay mode active but no replay observations found in database.")
+                    return [
+                        {
+                            "segment_id": seg,
+                            "as_of": None,
+                            "risk_score": None,
+                            "risk_tier": "UNKNOWN",
+                            "status": "NO_DATA",
+                            "is_stale": False,
+                            "model_version": engine.model_version,
+                            "checkpoint_sha256": self._checkpoint_sha256,
+                            "weather_window_end": None,
+                            "prediction_horizon_hours": 24,
+                            "data_timestamp": None,
+                            "warning": "No replay weather observations found.",
+                        }
+                        for seg in engine.segment_order
+                    ]
+                target_as_of = latest_db_date
+                win_end = target_as_of
+
+        # 3. Extract 7-day lookback window from weather_observation [win_end - 6 days, win_end]
+        target_dt = pd.to_datetime(win_end)
         start_dt = target_dt - timedelta(days=6)
         start_date = start_dt.strftime("%Y-%m-%d")
 
         obs_df = self.storage.get_observations(
             start_date=start_date,
-            end_date=target_date,
+            end_date=win_end,
             source=source_filter,
         )
 
@@ -204,7 +256,7 @@ class LiveRiskService:
 
         # 3. Detect segments with missing, incomplete, or flagged observations in 7-day lookback window
         missing_segment_ids = set()
-        required_dates = set(pd.date_range(start=start_date, end=target_date, freq="D").strftime("%Y-%m-%d"))
+        required_dates = set(pd.date_range(start=start_date, end=win_end, freq="D").strftime("%Y-%m-%d"))
 
         if obs_df.empty:
             missing_segment_ids = set(engine.segment_order)
@@ -255,7 +307,7 @@ class LiveRiskService:
                     is_stale=False,
                     model_version=engine.model_version,
                     prediction_horizon_hours=24,
-                    data_timestamp=f"{target_date}T00:00:00Z",
+                    data_timestamp=f"{target_as_of}T00:00:00Z",
                     warning=f"Corridor missing weather observations ({missing_fraction * 100:.1f}%) exceed threshold ({self.MISSING_DATA_THRESHOLD * 100:.0f}%).",
                 )
                 for seg in engine.segment_order
@@ -310,24 +362,49 @@ class LiveRiskService:
                 sanitized_df["date"] = sanitized_df["obs_date"]
 
             raw_predictions = engine.predict_corridor(
-                target_date=target_date,
+                target_date=win_end,
                 weather_df=sanitized_df,
                 static_df=static_df,
-                eval_time=effective_eval_time,
-                stale_hours_limit=24.0,
+                eval_time=None,
             )
 
-            # Map predictions: missing segments -> MISSING_DATA; adjacent neighbors -> NEIGHBOUR_DATA_MISSING
+            # Authoritative staleness evaluation: fresh if weather_window_end is yesterday (UTC) relative to clock
+            is_stale_compute = False
+            win_d = pd.to_datetime(win_end).date()
+            if source_filter == "replay" or settings.live_mode == "replay":
+                if eval_time is not None:
+                    eval_d = (eval_time.astimezone(timezone.utc) if eval_time.tzinfo else eval_time.replace(tzinfo=timezone.utc)).date()
+                    if (eval_d - win_d).days > 1:
+                        is_stale_compute = True
+            else:
+                if win_d < yesterday_utc:
+                    is_stale_compute = True
+
+            # Map predictions: missing segments -> MISSING_DATA; adjacent neighbors -> NEIGHBOUR_DATA_MISSING; stale -> STALE_DATA
             predictions: List[SegmentPrediction] = []
             for p in raw_predictions:
-                if p.segment_id in missing_segment_ids:
+                if is_stale_compute:
+                    predictions.append(
+                        SegmentPrediction(
+                            segment_id=p.segment_id,
+                            risk_score=p.risk_score,
+                            risk_tier="UNKNOWN",
+                            status="STALE_DATA",
+                            is_stale=True,
+                            model_version=p.model_version,
+                            prediction_horizon_hours=p.prediction_horizon_hours,
+                            data_timestamp=p.data_timestamp,
+                            warning="Weather observation lookback window is older than operational freshness limit.",
+                        )
+                    )
+                elif p.segment_id in missing_segment_ids:
                     predictions.append(
                         SegmentPrediction(
                             segment_id=p.segment_id,
                             risk_score=None,
                             risk_tier="UNKNOWN",
                             status="MISSING_DATA",
-                            is_stale=p.is_stale,
+                            is_stale=False,
                             model_version=p.model_version,
                             prediction_horizon_hours=p.prediction_horizon_hours,
                             data_timestamp=p.data_timestamp,
@@ -341,7 +418,7 @@ class LiveRiskService:
                             risk_score=None,
                             risk_tier="UNKNOWN",
                             status="NEIGHBOUR_DATA_MISSING",
-                            is_stale=p.is_stale,
+                            is_stale=False,
                             model_version=p.model_version,
                             prediction_horizon_hours=p.prediction_horizon_hours,
                             data_timestamp=p.data_timestamp,
@@ -356,22 +433,23 @@ class LiveRiskService:
         for p in predictions:
             records.append((
                 p.segment_id,
-                target_date,
+                target_as_of,
                 p.risk_score,
                 p.risk_tier,
                 p.status,
                 1 if p.is_stale else 0,
                 p.model_version,
                 self._checkpoint_sha256,
-                target_date,
+                win_end,
                 now_iso,
+                source_filter or "open-meteo",
             ))
 
         sql = """
             INSERT INTO live_risk (
                 segment_id, as_of, score, tier, status, is_stale,
-                model_version, checkpoint_sha256, weather_window_end, computed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                model_version, checkpoint_sha256, weather_window_end, computed_at, source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(segment_id, as_of) DO UPDATE SET
                 score = excluded.score,
                 tier = excluded.tier,
@@ -380,7 +458,8 @@ class LiveRiskService:
                 model_version = excluded.model_version,
                 checkpoint_sha256 = excluded.checkpoint_sha256,
                 weather_window_end = excluded.weather_window_end,
-                computed_at = excluded.computed_at;
+                computed_at = excluded.computed_at,
+                source = excluded.source;
         """
 
         with self._get_connection() as conn:
@@ -393,9 +472,10 @@ class LiveRiskService:
         self.prune_old_records(eval_time=effective_eval_time)
 
         logger.info(
-            "Computed and persisted live risk for %d segments (as_of: %s, status: %s)",
+            "Computed and persisted live risk for %d segments (as_of: %s, weather_window_end: %s, status: %s)",
             len(predictions),
-            target_date,
+            target_as_of,
+            win_end,
             predictions[0].status if predictions else "EMPTY",
         )
 
@@ -403,13 +483,14 @@ class LiveRiskService:
         try:
             from src.services.live_broadcast_service import live_broadcaster
             live_broadcaster.broadcast_sync("risk_update", {
-                "as_of": target_date,
+                "as_of": target_as_of,
+                "weather_window_end": win_end,
                 "computed_at": now_iso,
                 "segments_count": len(records),
             })
             live_broadcaster.broadcast_sync("route_update", {
                 "reason": "risk_recomputed",
-                "as_of": target_date,
+                "as_of": target_as_of,
                 "timestamp": now_iso,
             })
             live_broadcaster.broadcast_sync("status", self.get_live_status())
@@ -419,8 +500,9 @@ class LiveRiskService:
         out = []
         for p in predictions:
             d = p.to_dict()
+            d["as_of"] = target_as_of
             d["checkpoint_sha256"] = self._checkpoint_sha256
-            d["weather_window_end"] = target_date
+            d["weather_window_end"] = win_end
             out.append(d)
         return out
 
@@ -431,7 +513,16 @@ class LiveRiskService:
             if as_of:
                 target_as_of = as_of
             else:
-                latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
+                if settings.live_mode == "replay":
+                    latest_row = conn.execute(
+                        "SELECT MAX(as_of) FROM live_risk WHERE source = 'replay'"
+                    ).fetchone()
+                elif settings.live_mode == "live":
+                    latest_row = conn.execute(
+                        "SELECT MAX(as_of) FROM live_risk WHERE (source = 'open-meteo' OR source IS NULL)"
+                    ).fetchone()
+                else:
+                    latest_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
                 target_as_of = latest_row[0] if latest_row and latest_row[0] else None
 
             if not target_as_of:
@@ -446,6 +537,7 @@ class LiveRiskService:
                 )
                 return {
                     "as_of": None,
+                    "weather_window_end": None,
                     "computed_at": None,
                     "experimental": True,
                     "disclaimer": "Live data - Experimental - not validated. Relative advisory index.",
@@ -456,25 +548,66 @@ class LiveRiskService:
                     "segments": [],
                 }
 
-            cache_key = (str(self.storage.db_path), target_as_of)
+            cache_key = (str(self.storage.db_path), target_as_of, settings.live_mode, as_of)
             if self._risk_rows_cache and self._risk_rows_cache.get("key") == cache_key:
                 rows = self._risk_rows_cache["rows"]
             else:
-                rows = conn.execute(
-                    """
-                    SELECT segment_id, as_of, score, tier, status, is_stale,
-                           model_version, checkpoint_sha256, weather_window_end, computed_at
-                    FROM live_risk
-                    WHERE as_of = ?
-                    ORDER BY segment_id ASC
-                    """,
-                    (target_as_of,),
-                ).fetchall()
+                if as_of:
+                    rows = conn.execute(
+                        """
+                        SELECT segment_id, as_of, score, tier, status, is_stale,
+                               model_version, checkpoint_sha256, weather_window_end, computed_at
+                        FROM live_risk
+                        WHERE as_of = ?
+                        ORDER BY segment_id ASC
+                        """,
+                        (target_as_of,),
+                    ).fetchall()
+                elif settings.live_mode == "replay":
+                    rows = conn.execute(
+                        """
+                        SELECT segment_id, as_of, score, tier, status, is_stale,
+                               model_version, checkpoint_sha256, weather_window_end, computed_at
+                        FROM live_risk
+                        WHERE as_of = ? AND source = 'replay'
+                        ORDER BY segment_id ASC
+                        """,
+                        (target_as_of,),
+                    ).fetchall()
+                elif settings.live_mode == "live":
+                    rows = conn.execute(
+                        """
+                        SELECT segment_id, as_of, score, tier, status, is_stale,
+                               model_version, checkpoint_sha256, weather_window_end, computed_at
+                        FROM live_risk
+                        WHERE as_of = ? AND (source = 'open-meteo' OR source IS NULL)
+                        ORDER BY segment_id ASC
+                        """,
+                        (target_as_of,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT segment_id, as_of, score, tier, status, is_stale,
+                               model_version, checkpoint_sha256, weather_window_end, computed_at
+                        FROM live_risk
+                        WHERE as_of = ?
+                        ORDER BY segment_id ASC
+                        """,
+                        (target_as_of,),
+                    ).fetchall()
                 self._risk_rows_cache = {"key": cache_key, "rows": rows}
 
         from src.services.hazard_event_service import hazard_event_service
 
-        effective_now = eval_time or datetime.now(timezone.utc)
+        raw_now = eval_time or datetime.now(timezone.utc)
+        if raw_now.tzinfo is None:
+            effective_now = raw_now.replace(tzinfo=timezone.utc)
+        else:
+            effective_now = raw_now.astimezone(timezone.utc)
+        now_today_utc = effective_now.date()
+        now_yesterday_utc = now_today_utc - timedelta(days=1)
+
         events_map = hazard_event_service.get_active_events_by_segment_map(now=effective_now)
         segments = []
         summary = {"Low": 0, "Medium": 0, "High": 0, "UNKNOWN": 0}
@@ -486,27 +619,37 @@ class LiveRiskService:
             computed_at = r["computed_at"]
             db_is_stale = bool(r["is_stale"])
 
-            # Read-time 24h staleness evaluation relative to effective_now
+            # Read-time authoritative staleness evaluation relative to effective_now
             is_stale_read = db_is_stale
-            if not is_stale_read and computed_at:
-                try:
-                    comp_dt = datetime.fromisoformat(computed_at.replace("Z", "+00:00"))
-                    if (effective_now - comp_dt).total_seconds() > 24 * 3600:
+
+            # 1. Evaluate computed_at age against MAX_DATA_AGE_HOURS (24.0h)
+            if not is_stale_read:
+                if not computed_at:
+                    is_stale_read = True
+                else:
+                    try:
+                        comp_dt = datetime.fromisoformat(computed_at.replace("Z", "+00:00"))
+                        if (effective_now - comp_dt).total_seconds() > MAX_DATA_AGE_HOURS * 3600:
+                            is_stale_read = True
+                    except Exception:
                         is_stale_read = True
-                except Exception:
-                    pass
-            if not is_stale_read and r["weather_window_end"]:
-                try:
-                    win_dt = datetime.strptime(r["weather_window_end"][:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                    if settings.live_mode == "replay":
-                        target_dt = datetime.strptime(target_as_of[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                        if (target_dt - win_dt).total_seconds() > 24 * 3600:
-                            is_stale_read = True
-                    else:
-                        if (effective_now.date() - win_dt.date()).days > 1:
-                            is_stale_read = True
-                except Exception:
-                    pass
+
+            # 2. Evaluate weather window end
+            if not is_stale_read:
+                if not r["weather_window_end"]:
+                    is_stale_read = True
+                else:
+                    try:
+                        win_d = datetime.strptime(r["weather_window_end"][:10], "%Y-%m-%d").date()
+                        if settings.live_mode == "replay":
+                            target_d = datetime.strptime(target_as_of[:10], "%Y-%m-%d").date()
+                            if (target_d - win_d).days > 1:
+                                is_stale_read = True
+                        else:
+                            if win_d < now_yesterday_utc:
+                                is_stale_read = True
+                    except Exception:
+                        is_stale_read = True
 
             status = "STALE_DATA" if is_stale_read and r["status"] == "OK" else r["status"]
             tier = "UNKNOWN" if is_stale_read else r["tier"]
@@ -557,8 +700,11 @@ class LiveRiskService:
             )
         )
 
+        top_window_end = rows[0]["weather_window_end"] if rows else None
+
         return {
             "as_of": target_as_of,
+            "weather_window_end": top_window_end,
             "computed_at": computed_at,
             "experimental": True,
             "disclaimer": "Live data - Experimental - not validated. Relative advisory index.",
@@ -622,11 +768,14 @@ class LiveRiskService:
     def get_live_status(self) -> Dict[str, Any]:
         """Returns comprehensive operational status for live monitoring."""
         self.init_db()
-        latest_weather_date = self.storage.get_latest_observation_date()
-        latest_fetch = self.storage.get_latest_fetched_at()
+        provider_source = "open-meteo" if settings.live_mode == "live" else ("replay" if settings.live_mode == "replay" else None)
+        latest_weather_date = self.storage.get_latest_observation_date(source=provider_source)
+        latest_fetch = self.storage.get_latest_fetched_at(source=provider_source)
 
         data_age_hours: Optional[float] = None
-        if latest_fetch:
+        if settings.live_mode == "replay":
+            data_age_hours = 0.0
+        elif latest_fetch:
             try:
                 fetch_dt = datetime.fromisoformat(latest_fetch.replace("Z", "+00:00"))
                 data_age_hours = round((datetime.now(timezone.utc) - fetch_dt).total_seconds() / 3600.0, 2)
@@ -634,21 +783,37 @@ class LiveRiskService:
                 pass
 
         with self._get_connection() as conn:
-            latest_as_of_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
+            if settings.live_mode == "replay":
+                latest_as_of_row = conn.execute(
+                    "SELECT MAX(as_of) FROM live_risk WHERE source = 'replay'",
+                ).fetchone()
+            elif settings.live_mode == "live":
+                latest_as_of_row = conn.execute(
+                    "SELECT MAX(as_of) FROM live_risk WHERE (source = 'open-meteo' OR source IS NULL)"
+                ).fetchone()
+            else:
+                latest_as_of_row = conn.execute("SELECT MAX(as_of) FROM live_risk").fetchone()
             latest_as_of = latest_as_of_row[0] if latest_as_of_row and latest_as_of_row[0] else None
 
             if latest_as_of:
+                where_clause = "WHERE as_of = ?"
+                params = [latest_as_of]
+                if settings.live_mode == "replay":
+                    where_clause += " AND source = 'replay'"
+                elif settings.live_mode == "live":
+                    where_clause += " AND (source = 'open-meteo' OR source IS NULL)"
+
                 unknown_count = conn.execute(
-                    "SELECT COUNT(*) FROM live_risk WHERE as_of = ? AND tier = 'UNKNOWN'",
-                    (latest_as_of,),
+                    f"SELECT COUNT(*) FROM live_risk {where_clause} AND tier = 'UNKNOWN'",
+                    params,
                 ).fetchone()[0]
                 stale_count = conn.execute(
-                    "SELECT COUNT(*) FROM live_risk WHERE as_of = ? AND is_stale = 1",
-                    (latest_as_of,),
+                    f"SELECT COUNT(*) FROM live_risk {where_clause} AND is_stale = 1",
+                    params,
                 ).fetchone()[0]
                 total_segments = conn.execute(
-                    "SELECT COUNT(*) FROM live_risk WHERE as_of = ?",
-                    (latest_as_of,),
+                    f"SELECT COUNT(*) FROM live_risk {where_clause}",
+                    params,
                 ).fetchone()[0]
             else:
                 unknown_count = 151

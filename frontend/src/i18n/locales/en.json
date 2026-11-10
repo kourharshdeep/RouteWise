@@ -196,7 +196,16 @@
     "status_unknown": "Unknown",
     "simulated_events": "Active Simulated Events",
     "verified_events": "Active Verified Hazards",
-    "refresh_now": "Refresh Live Telemetry"
+    "refresh_now": "Refresh Live Telemetry",
+    "replay_mode": "REPLAY / simulated scenario",
+    "mode_off_notice": "Live mode not enabled (ROUTEWISE_LIVE_MODE is 'off')",
+    "weather_window_end": "Weather data window through",
+    "source_label": "Source",
+    "aria_stale_telemetry": "Stale Telemetry (>24h)",
+    "aria_unknown_telemetry": "Unknown / Missing Telemetry",
+    "aria_high_hazard": "High Hazard (≥0.35)",
+    "aria_elevated_hazard": "Elevated Hazard (0.10–0.35)",
+    "aria_baseline_hazard": "Baseline Hazard (<0.10)"
   },
   "routing": {
     "recommendation_hold": "HOLD",

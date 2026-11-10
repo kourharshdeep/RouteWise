@@ -196,7 +196,16 @@
     "status_unknown": "अज्ञात",
     "simulated_events": "सक्रिय सिमुलेटेड घटनाएं",
     "verified_events": "सक्रिय सत्यापित खतरे",
-    "refresh_now": "लाइव टेलीमेट्री रीफ़्रेश करें"
+    "refresh_now": "लाइव टेलीमेट्री रीफ़्रेश करें",
+    "replay_mode": "रीप्ले / सिम्युलेटेड परिदृश्य",
+    "mode_off_notice": "लाइव मोड सक्षम नहीं है (ROUTEWISE_LIVE_MODE 'off' है)",
+    "weather_window_end": "मौसम डेटा विंडो समाप्ति",
+    "source_label": "स्रोत",
+    "aria_stale_telemetry": "पुराना टेलीमेट्री डेटा (>24 घंटे)",
+    "aria_unknown_telemetry": "अज्ञात / अनुपलब्ध टेलीमेट्री",
+    "aria_high_hazard": "उच्च जोखिम (≥0.35)",
+    "aria_elevated_hazard": "मध्यम जोखिम (0.10–0.35)",
+    "aria_baseline_hazard": "आधार रेखा जोखिम (<0.10)"
   },
   "routing": {
     "recommendation_hold": "रुकें (HOLD)",

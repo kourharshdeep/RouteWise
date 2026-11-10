@@ -97,16 +97,27 @@ export default function Overview({
           </div>
         </div>
 
-        {/* Retrospective Science Notice */}
-        <div className="retrospective-banner" style={{ marginTop: 16 }}>
-          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-          <div>
-            <strong>Retrospective Environmental Reanalysis Notice:</strong> Segment risk scores
-            are calculated from historical Copernicus ERA5-Land meteorological reanalysis and SRTM topographic
-            DEM slope metrics. They represent <em>advisory relative risk ranking</em> for situational awareness
-            and logistics planning; they do not represent live traffic or road safety guarantees.
+        {/* Notice Banner: Retrospective Historical Reanalysis or Live Advisory */}
+        {!isLive ? (
+          <div className="retrospective-banner" style={{ marginTop: 16 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <strong>Retrospective Environmental Reanalysis Notice:</strong> Segment risk scores
+              are calculated from historical Copernicus ERA5-Land meteorological reanalysis and SRTM topographic
+              DEM slope metrics. They represent <em>advisory relative risk ranking</em> for situational awareness
+              and logistics planning; they do not represent live traffic or road safety guarantees.
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="retrospective-banner" style={{ marginTop: 16, borderColor: 'var(--accent-secondary)' }}>
+            <Radio size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--accent-secondary)' }} />
+            <div>
+              <strong>{liveStatus?.mode === 'replay' ? t('live.replay_mode') : t('live.live_mode')}:</strong> Segment risk scores
+              are evaluated from recent atmospheric observations ({liveStatus?.provider === 'open-meteo' ? 'Open-Meteo' : (liveStatus?.mode === 'replay' ? 'Replay' : 'Telemetry')}).
+              Live predictions are advisory relative-risk indices subject to atmospheric distribution shift, not certified probabilities.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Corridor Segment Risk Strip */}
@@ -124,7 +135,7 @@ export default function Overview({
         {/* Active Date Risk Snapshot */}
         <div className="card">
           <div className="card-title">
-            <span>Corridor Risk Snapshot {isLive ? `(${t('live.live_mode')})` : `(${selectedDate})`}</span>
+            <span>Corridor Risk Snapshot {isLive ? `(${liveStatus?.mode === 'replay' ? t('live.replay_mode') : t('live.live_mode')} - ${selectedDate})` : `(${selectedDate})`}</span>
             <Layers size={16} style={{ color: 'var(--accent-secondary)' }} />
           </div>
 
@@ -272,6 +283,7 @@ export default function Overview({
           segmentId={activeDrawerSegId}
           selectedDate={selectedDate}
           riskItem={selectedRiskItem}
+          mode={mode}
           onClose={() => setActiveDrawerSegId(null)}
           onNavigateToMap={() => onNavigate('map')}
         />

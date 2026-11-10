@@ -131,6 +131,27 @@ The following string was added for model-derived alerts when live telemetry exce
 | :--- | :--- | :--- | :--- |
 | `alerts.lastKnownDataStale` | `Last known, data stale` | `अंतिम ज्ञात स्थिति, डेटा पुराना है` | Stale risk context indicator for model-derived alerts (Unreviewed) |
 
+---
 
+## 10. Unreviewed Additions (Task 3 - Current-Date Live Risk Experience)
+The following strings were added for the current-date live risk experience, operational mode separation, replay labeling, and weather window indicator, and are explicitly marked as **Unreviewed**:
 
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| `live.replay_mode` | `REPLAY / simulated scenario` | `रीप्ले / सिम्युलेटेड परिदृश्य` | Operational banner tag for demonstration replay mode |
+| `live.mode_off_notice` | `Live mode not enabled (ROUTEWISE_LIVE_MODE is 'off')` | `लाइव मोड सक्षम नहीं है (ROUTEWISE_LIVE_MODE 'off' है)` | Advisory when live ingestion is configured off |
+| `live.weather_window_end` | `Weather data window through` | `मौसम डेटा विंडो समाप्ति` | Label for last complete meteorological observation day |
+| `live.source_label` | `Source` | `स्रोत` | Label for atmospheric telemetry data provider |
 
+---
+
+## 11. Unreviewed Additions (Task 3a - Accessible Non-Color Cues & Aria Labels)
+The following strings were added for corridor segment accessibility non-color cues and screen reader telemetry labels, and are explicitly marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| live.aria_stale_telemetry | Stale Telemetry (>24h) | पुराना टेलीमेट्री डेटा (>24 घंटे) | Accessibility label for stale segment telemetry |
+| live.aria_unknown_telemetry | Unknown / Missing Telemetry | अज्ञात / अनुपलब्ध टेलीमेट्री | Accessibility label for missing or neighbour-missing segment data |
+| live.aria_high_hazard | High Hazard (≥0.35) | उच्च जोखिम (≥0.35) | Accessibility label for high hazard segment |
+| live.aria_elevated_hazard | Elevated Hazard (0.10–0.35) | मध्यम जोखिम (0.10–0.35) | Accessibility label for medium hazard segment |
+| live.aria_baseline_hazard | Baseline Hazard (<0.10) | आधार रेखा जोखिम (<0.10) | Accessibility label for low hazard segment |

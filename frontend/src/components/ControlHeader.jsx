@@ -137,13 +137,32 @@ export default function ControlHeader({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
             <Radio size={15} style={{ color: 'var(--accent-secondary)' }} aria-hidden="true" />
             <span>
-              <strong>Live Telemetry Horizon:</strong> 24-hour advisory relative risk evaluated from{' '}
-              {liveStatus?.provider === 'open-meteo' ? 'Open-Meteo' : 'Replay'} weather ingestion.
+              {liveStatus?.mode === 'off' ? (
+                <strong style={{ color: 'var(--text-muted)' }}>{t('live.mode_off_notice')}</strong>
+              ) : liveStatus?.mode === 'replay' ? (
+                <>
+                  <strong>{t('live.replay_mode')}:</strong> 24-hour advisory relative risk evaluated from Replay scenario simulation.
+                </>
+              ) : (
+                <>
+                  <strong>Live Telemetry Horizon:</strong> 24-hour advisory relative risk evaluated from Open-Meteo weather ingestion.
+                </>
+              )}
             </span>
           </div>
 
-          <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            Evaluated Target: <strong>{liveStatus?.latest_weather_date || 'Today (T+1)'}</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 12, color: 'var(--text-dim)', flexWrap: 'wrap' }}>
+            <div>
+              {t('live.source_label')}: <strong>{liveStatus?.provider === 'open-meteo' ? 'Open-Meteo' : (liveStatus?.mode === 'replay' ? 'Replay' : 'None')}</strong>
+            </div>
+            {liveStatus?.latest_weather_date && (
+              <div>
+                {t('live.weather_window_end')}: <strong>{liveStatus.latest_weather_date}</strong>
+              </div>
+            )}
+            <div>
+              Current Advisory: <strong>{selectedDate || 'Today'}</strong>
+            </div>
           </div>
         </div>
       )}

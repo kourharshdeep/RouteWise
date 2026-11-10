@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -67,8 +68,9 @@ def test_historical_golden_output(fixture_name: str, origin: str, destination: s
         ("golden_journey_live_reverse.json", "Banihal Gateway", "Ramban Gateway"),
     ],
 )
-def test_live_golden_output_with_seeded_hazards(tmp_path: Path, fixture_name: str, origin: str, destination: str):
+def test_live_golden_output_with_seeded_hazards(tmp_path: Path, fixture_name: str, origin: str, destination: str, set_live_mode):
     """Live journey plan responses with CLOSED and UNKNOWN segments must match pre-optimization golden fixtures."""
+    set_live_mode("live")
     fixture_path = FIXTURES_DIR / fixture_name
     assert fixture_path.exists(), f"Fixture missing: {fixture_path}"
 
@@ -119,7 +121,8 @@ def test_live_golden_output_with_seeded_hazards(tmp_path: Path, fixture_name: st
             mode="live",
             vehicle_type="Car",
         )
-        actual = journey_service.plan_journey(req).model_dump()
+        now_test = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
+        actual = journey_service.plan_journey(req, now=now_test).model_dump()
 
         assert _normalize_response(actual) == _normalize_response(expected)
     finally:

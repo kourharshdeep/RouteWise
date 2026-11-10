@@ -327,7 +327,7 @@ class JourneyService:
         journey_date_str = req.date
 
         if mode == "live":
-            from src.services.live_risk_service import live_risk_service
+            from src.services.live_risk_service import MAX_DATA_AGE_HOURS, live_risk_service
 
             live_risk = live_risk_service.get_latest_live_risk(as_of=req.date, eval_time=now)
 
@@ -339,13 +339,15 @@ class JourneyService:
             effective_now = now or datetime.now(timezone.utc)
             comp_at_str = live_risk.get("computed_at")
             is_older_than_24h = False
-            if comp_at_str:
+            if not comp_at_str:
+                is_older_than_24h = True
+            else:
                 try:
                     comp_dt = datetime.fromisoformat(comp_at_str.replace("Z", "+00:00"))
-                    if (effective_now - comp_dt).total_seconds() > 24 * 3600:
+                    if (effective_now - comp_dt).total_seconds() > MAX_DATA_AGE_HOURS * 3600:
                         is_older_than_24h = True
                 except Exception:
-                    pass
+                    is_older_than_24h = True
 
             is_live_stale = (
                 is_older_than_24h

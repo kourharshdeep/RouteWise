@@ -33,10 +33,14 @@ def _create_mock_response(
     t_min: List[float],
     snow_depth_hourly: Dict[str, List[float]],
 ) -> dict:
-    """Generates synthetic Open-Meteo response structure for testing."""
+    """Generates synthetic Open-Meteo response with 24 hourly readings per day."""
     hourly_times = []
     hourly_depths = []
+
     for d, depths in snow_depth_hourly.items():
+        if depths:
+            depths = (depths * ((24 + len(depths) - 1) // len(depths)))[:24]
+
         for hr, val in enumerate(depths):
             hourly_times.append(f"{d}T{hr:02d}:00Z")
             hourly_depths.append(val)
@@ -273,6 +277,38 @@ def test_null_weather_fields_preserved_as_nan_with_quality_flag(tmp_path: Path):
     assert pd.isna(stored_row["precip_mm"])
     assert stored_row["quality_flag"] == "MISSING_DATA"
 
+def test_missing_snow_depth_is_not_treated_as_zero():
+    """Missing hourly snow depth must remain missing, not become zero."""
+
+    mock_data = {
+        "daily": {
+            "time": ["2026-11-01"],
+            "precipitation_sum": [0.0],
+            "snowfall_sum": [0.0],
+            "temperature_2m_mean": [10.0],
+            "temperature_2m_min": [5.0],
+        },
+        "hourly": {
+            "time": [f"2026-11-01T{hour:02d}:00Z" for hour in range(24)],
+            "snow_depth": [None] * 24,
+        },
+    }
+
+    provider = OpenMeteoProvider(fetcher=lambda url, timeout: mock_data)
+
+    cluster = GridCluster(
+        cluster_id="TEST_CLUSTER",
+        latitude=33.5,
+        longitude=75.2,
+        segment_ids=("TEST_SEGMENT",),
+    )
+
+    df = provider.parse_cluster_response(mock_data, cluster)
+
+    assert len(df) == 1
+    assert pd.isna(df.iloc[0]["snow_depth_m"])
+    assert df.iloc[0]["quality_flag"] == "MISSING_DATA"
+
 
 def test_genuine_zero_precipitation_not_flagged(tmp_path: Path):
     """Ingesting genuine 0.0 mm precipitation: stored as 0.0 (not NaN), quality_flag is normal."""
@@ -285,8 +321,8 @@ def test_genuine_zero_precipitation_not_flagged(tmp_path: Path):
             "temperature_2m_min": [8.0],
         },
         "hourly": {
-            "time": ["2026-11-01T00:00Z"],
-            "snow_depth": [0.0],
+            "time": [f"2026-11-01T{hour:02d}:00Z" for hour in range(24)],
+            "snow_depth": [0.0] * 24,
         },
     }
     provider = OpenMeteoProvider(fetcher=lambda url, timeout: mock_data)

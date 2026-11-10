@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -23,8 +24,9 @@ from src.services.live_risk_service import live_risk_service
 from src.services.weather.storage import weather_storage
 
 
-def test_cache_invalidation_on_risk_change(tmp_path: Path):
+def test_cache_invalidation_on_risk_change(tmp_path: Path, set_live_mode):
     """Proves that computing/updating live risk is reflected in the very next journey plan."""
+    set_live_mode("live")
     test_db = tmp_path / "risk_inval.db"
     old_path = weather_storage.db_path
     try:
@@ -57,7 +59,8 @@ def test_cache_invalidation_on_risk_change(tmp_path: Path):
         live_risk_service.invalidate_cache()
 
         req = JourneyPlanRequest(origin="Ramban Gateway", destination="Banihal Gateway", mode="live")
-        plan1 = journey_service.plan_journey(req)
+        now_test = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
+        plan1 = journey_service.plan_journey(req, now=now_test)
         assert plan1.recommendation == "PROCEED"
         assert plan1.max_risk_score == pytest.approx(0.04, abs=0.001)
 
@@ -77,7 +80,7 @@ def test_cache_invalidation_on_risk_change(tmp_path: Path):
         live_risk_service.invalidate_cache()
 
         # 3. Next journey response must immediately reflect high risk and DELAY recommendation
-        plan2 = journey_service.plan_journey(req)
+        plan2 = journey_service.plan_journey(req, now=now_test)
         assert plan2.max_risk_score == pytest.approx(0.88, abs=0.001)
         assert plan2.high_risk_segments_count >= 1
         assert plan2.recommendation == "DELAY"
@@ -85,8 +88,9 @@ def test_cache_invalidation_on_risk_change(tmp_path: Path):
         weather_storage.db_path = old_path
 
 
-def test_cache_invalidation_on_hazard_event_change(tmp_path: Path):
+def test_cache_invalidation_on_hazard_event_change(tmp_path: Path, set_live_mode):
     """Proves that simulating and clearing hazard events is reflected in the very next journey plan."""
+    set_live_mode("live")
     test_db = tmp_path / "hazard_inval.db"
     old_path = weather_storage.db_path
     try:
@@ -119,9 +123,10 @@ def test_cache_invalidation_on_hazard_event_change(tmp_path: Path):
         hazard_event_service.invalidate_cache()
 
         req = JourneyPlanRequest(origin="Ramban Gateway", destination="Banihal Gateway", mode="live")
+        now_test = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
 
         # Initial baseline: clear route
-        plan_initial = journey_service.plan_journey(req)
+        plan_initial = journey_service.plan_journey(req, now=now_test)
         assert plan_initial.recommendation == "PROCEED"
         assert len(plan_initial.blocking_segments) == 0
 
@@ -136,7 +141,7 @@ def test_cache_invalidation_on_hazard_event_change(tmp_path: Path):
         )
 
         # Very next plan must immediately show HOLD and closed segment
-        plan_closed = journey_service.plan_journey(req)
+        plan_closed = journey_service.plan_journey(req, now=now_test)
         assert plan_closed.recommendation == "HOLD"
         assert target_seg in plan_closed.blocking_segments
         assert plan_closed.baseline_route.is_passable is False
@@ -145,7 +150,7 @@ def test_cache_invalidation_on_hazard_event_change(tmp_path: Path):
         hazard_event_service.clear_all_simulated_events()
 
         # Very next plan must immediately restore clear route
-        plan_restored = journey_service.plan_journey(req)
+        plan_restored = journey_service.plan_journey(req, now=now_test)
         assert plan_restored.recommendation == "PROCEED"
         assert len(plan_restored.blocking_segments) == 0
         assert plan_restored.baseline_route.is_passable is True
@@ -153,8 +158,9 @@ def test_cache_invalidation_on_hazard_event_change(tmp_path: Path):
         weather_storage.db_path = old_path
 
 
-def test_empty_live_risk_returns_failsafe(tmp_path: Path):
+def test_empty_live_risk_returns_failsafe(tmp_path: Path, set_live_mode):
     """Empty live_risk table must return fail-safe NO_DATA result without computing risk on the fly."""
+    set_live_mode("live")
     test_db = tmp_path / "empty_live.db"
     old_path = weather_storage.db_path
     try:
@@ -191,8 +197,9 @@ def test_empty_live_risk_returns_failsafe(tmp_path: Path):
         weather_storage.db_path = old_path
 
 
-def test_stale_live_risk_returns_failsafe(tmp_path: Path):
+def test_stale_live_risk_returns_failsafe(tmp_path: Path, set_live_mode):
     """Stale live_risk records (is_stale=1) must trigger fail-safe NO_DATA recommendation."""
+    set_live_mode("live")
     test_db = tmp_path / "stale_live.db"
     old_path = weather_storage.db_path
     try:
@@ -262,8 +269,9 @@ def test_static_caching_and_latency_bound():
     assert corridor_service._geojson_cache is not None, "GeoJSON cache should remain populated across calls"
 
 
-def test_hazard_event_cache_respects_expiration_without_mutation(tmp_path: Path):
+def test_hazard_event_cache_respects_expiration_without_mutation(tmp_path: Path, set_live_mode):
     """Proves the hazard-event cache auto-invalidates and drops expired events when expires_at passes without DB mutation."""
+    set_live_mode("live")
     from datetime import datetime, timedelta, timezone
 
     test_db = tmp_path / "hazard_exp.db"
@@ -427,8 +435,9 @@ def test_runtime_db_deletion_while_init_cache_warm_recreates_tables(tmp_path: Pa
         weather_storage.db_path = old_path
 
 
-def test_staleness_at_read_time_with_injected_clock(tmp_path: Path):
+def test_staleness_at_read_time_with_injected_clock(tmp_path: Path, set_live_mode):
     """Proves that live_risk older than 24h is evaluated as stale at read time regardless of DB flag or cache."""
+    set_live_mode("live")
     from datetime import datetime, timedelta, timezone
     from src.services.alert_service import alert_service
 

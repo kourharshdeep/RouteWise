@@ -19,6 +19,7 @@ export default function RiskDetailDrawer({
   segmentId,
   selectedDate,
   riskItem,
+  mode = 'historical',
   onClose,
   onNavigateToMap,
 }) {
@@ -106,8 +107,8 @@ export default function RiskDetailDrawer({
             <Calendar size={13} style={{ display: 'inline', marginRight: 4 }} />
             {selectedDate}
           </span>
-          <span className="badge badge-retrospective">
-            {t('app.retrospective_badge')}
+          <span className={mode === 'live' ? 'badge badge-warning' : 'badge badge-retrospective'}>
+            {mode === 'live' ? t('live.experimental_badge') : t('app.retrospective_badge')}
           </span>
           <span className={`badge ${tierClass}`}>
             {tier} Risk ({score !== null ? score.toFixed(3) : 'N/A'})

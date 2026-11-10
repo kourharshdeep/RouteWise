@@ -40,6 +40,7 @@ class LiveRiskSegmentItem(BaseModel):
 
 class LiveRiskResponse(BaseModel):
     as_of: Optional[str] = Field(None, description="Evaluation target date (YYYY-MM-DD)")
+    weather_window_end: Optional[str] = Field(None, description="End date of 7-day atmospheric observation window")
     computed_at: Optional[str] = Field(None, description="Timestamp of inference execution")
     experimental: bool = Field(True, description="Always true; live predictions are not validated")
     disclaimer: str = Field(..., description="Honest framing disclaimer regarding distribution shift")

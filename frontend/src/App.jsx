@@ -21,6 +21,7 @@ import {
   getLiveStreamUrl,
   fetchActiveAlerts,
 } from "./services/api";
+import { resolveEffectiveMode, getEffectiveDate } from "./services/liveModeHelper";
 
 import Navigation from "./components/Navigation";
 import Overview from "./components/Overview";
@@ -381,6 +382,35 @@ function AppContent() {
       } finally {
         setIsLoading(false);
       }
+    } else if (newMode === "live") {
+      try {
+        setIsLoading(true);
+        const [statusRes, riskRes] = await Promise.all([
+          fetchLiveStatus().catch(() => null),
+          fetchLiveRisk().catch((err) => {
+            console.warn("Live risk fetch failed:", err);
+            return null;
+          }),
+        ]);
+        if (statusRes) setLiveStatus(statusRes);
+        if (riskRes) {
+          setRiskData(riskRes);
+        } else if (statusRes?.mode === "off") {
+          setRiskData({
+            as_of: null,
+            computed_at: null,
+            experimental: false,
+            disclaimer: "Live mode not enabled",
+            summary: { Low: 0, Medium: 0, High: 0, UNKNOWN: 151 },
+            operational_summary: { OPEN: 0, CAUTION: 0, RESTRICTED: 0, CLOSED: 0, UNKNOWN: 151 },
+            segments: [],
+          });
+        }
+      } catch (err) {
+        console.error("Failed to load live data on mode switch:", err);
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -590,6 +620,14 @@ function AppContent() {
     initDashboard();
   }, []);
 
+  const displayDate = getEffectiveDate({
+    userMode: dashboardMode,
+    backendMode: liveStatus?.mode,
+    selectedHistoricalDate: selectedDate,
+    liveRiskData: riskData,
+    liveStatus: liveStatus,
+  });
+
   return (
     <Routes>
       {/* Public Landing & Authentication Routes */}
@@ -629,7 +667,7 @@ function AppContent() {
               health={health}
               availableDates={availableDates}
               geojson={geojson}
-              selectedDate={selectedDate}
+              selectedDate={displayDate}
               setSelectedDate={setSelectedDate}
               riskData={riskData}
               setRiskData={setRiskData}

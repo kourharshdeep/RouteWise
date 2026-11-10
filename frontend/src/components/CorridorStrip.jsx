@@ -1,6 +1,7 @@
 import React, { useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import sortedSegmentIds from '../data/corridorSegmentsSorted.json';
+import { getSegmentAccessibilityCue } from '../services/liveModeHelper.js';
 
 const LANDMARKS = [
   { index: 0, name: 'Chanderkot', chainage: 'Km 0' },
@@ -54,6 +55,7 @@ export default function CorridorStrip({
           <strong>NH-44 Ramban–Banihal Continuous Corridor Strip</strong>
           {isLive ? (
             <>
+              <span className="badge badge-subtle">{selectedDate}</span>
               <span className="badge badge-subtle">{t('live.live_mode')}</span>
               <span className="badge badge-warning" style={{ fontSize: 10 }}>
                 {t('live.experimental_badge')}
@@ -118,18 +120,17 @@ export default function CorridorStrip({
               const opStatus = seg.operational_status;
               const hasEvents = seg.active_events && seg.active_events.length > 0;
 
-              let tierClass = 'seg-unknown';
-              let accessibilityIcon = '?';
-              if (tier === 'High') {
-                tierClass = 'seg-high';
-                accessibilityIcon = '▲';
-              } else if (tier === 'Medium') {
-                tierClass = 'seg-medium';
-                accessibilityIcon = '■';
-              } else if (tier === 'Low') {
-                tierClass = 'seg-low';
-                accessibilityIcon = '●';
-              }
+              const cue = getSegmentAccessibilityCue(tier, seg.status, seg.is_stale, t);
+              const accessibilityIcon = cue.symbol;
+              const tierClass = isLive && (seg.is_stale || seg.status === 'STALE_DATA')
+                ? 'seg-unknown chip-stale'
+                : tier === 'High'
+                ? 'seg-high'
+                : tier === 'Medium'
+                ? 'seg-medium'
+                : tier === 'Low'
+                ? 'seg-low'
+                : 'seg-unknown';
 
               const scoreLabel = score !== null && score !== undefined ? score.toFixed(3) : 'N/A';
               const opLabel = opStatus ? `\nStatus: ${opStatus}` : '';
@@ -143,7 +144,7 @@ export default function CorridorStrip({
                   className={`corridor-seg-bar ${tierClass} ${isSelected ? 'selected' : ''}`}
                   onClick={() => onSelectSegment(seg.segment_id)}
                   onKeyDown={(e) => handleKeyDown(e, idx)}
-                  aria-label={`Segment ${idx + 1}: ${tier} risk, score ${scoreLabel}${opStatus ? `, status ${opStatus}` : ''}`}
+                  aria-label={`Segment ${idx + 1}: ${cue.ariaLabel}, score ${scoreLabel}${opStatus ? `, status ${opStatus}` : ''}`}
                   title={`Segment ${idx + 1} (${seg.segment_id})\nRisk: ${tier} (${scoreLabel})${opLabel}${evLabel}\nClick to inspect features`}
                 >
                   <span className="seg-cues" aria-hidden="true">

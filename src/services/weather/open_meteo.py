@@ -152,12 +152,26 @@ class OpenMeteoProvider(WeatherProvider):
         hourly_depths = hourly.get("snow_depth", [])
 
         daily_snow_depth_map: Dict[str, float] = {}
-        if hourly_times and hourly_depths:
-            for t_str, depth in zip(hourly_times, hourly_depths):
-                d_str = t_str[:10]  # 'YYYY-MM-DD'
-                depth_val = float(depth) if depth is not None else 0.0
-                if d_str not in daily_snow_depth_map or depth_val > daily_snow_depth_map[d_str]:
-                    daily_snow_depth_map[d_str] = depth_val
+        hourly_values_by_day: Dict[str, List[Optional[float]]] = {}
+
+        for idx, t_str in enumerate(hourly_times):
+            d_str = t_str[:10]
+            raw_depth = hourly_depths[idx] if idx < len(hourly_depths) else None
+
+            try:
+                depth_val = float(raw_depth)
+                if pd.isna(depth_val):
+                    depth_val = None
+            except (TypeError, ValueError):
+                depth_val = None
+
+            hourly_values_by_day.setdefault(d_str, []).append(depth_val)
+
+        for d_str, values in hourly_values_by_day.items():
+            if len(values) != 24 or any(value is None for value in values):
+                daily_snow_depth_map[d_str] = float("nan")
+            else:
+                daily_snow_depth_map[d_str] = max(values)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         rows: List[dict] = []
@@ -179,7 +193,7 @@ class OpenMeteoProvider(WeatherProvider):
             temp_min_raw = temp_mins[idx] if idx < len(temp_mins) else None
             temp_min_c = float(temp_min_raw) if (temp_min_raw is not None and not pd.isna(temp_min_raw)) else float("nan")
 
-            snow_depth_m = daily_snow_depth_map.get(obs_date, 0.0)
+            snow_depth_m = daily_snow_depth_map.get(obs_date, float("nan"))
 
             # Check if any required feature is missing
             has_missing = any(

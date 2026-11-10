@@ -180,7 +180,10 @@ def test_database_aware_rolling_precipitation_uses_db_history(tmp_path: Path):
             "temperature_2m_mean": [22.0],
             "temperature_2m_min": [16.0],
         },
-        "hourly": {"time": ["2024-07-07T00:00Z"], "snow_depth": [0.0]},
+        "hourly": {
+            "time": [f"2024-07-07T{hour:02d}:00Z" for hour in range(24)],
+            "snow_depth": [0.0] * 24,
+        },
     }
     provider = OpenMeteoProvider(fetcher=lambda url, timeout: day_t_data, storage=storage)
     df_day_t = provider.fetch(start_date="2024-07-07", end_date="2024-07-07")
@@ -209,7 +212,10 @@ def test_database_aware_rolling_precipitation_insufficient_history_flagged(tmp_p
             "temperature_2m_mean": [22.0],
             "temperature_2m_min": [16.0],
         },
-        "hourly": {"time": ["2024-07-07T00:00Z"], "snow_depth": [0.0]},
+        "hourly": {
+            "time": [f"2024-07-07T{hour:02d}:00Z" for hour in range(24)],
+            "snow_depth": [0.0] * 24,
+        },
     }
     provider = OpenMeteoProvider(fetcher=lambda url, timeout: day_t_data, storage=storage)
     df_day_t = provider.fetch(start_date="2024-07-07", end_date="2024-07-07")
@@ -239,7 +245,10 @@ def test_database_aware_rolling_precipitation_incremental_matches_batch(tmp_path
                 "temperature_2m_mean": [20.0],
                 "temperature_2m_min": [15.0],
             },
-            "hourly": {"time": [f"{d}T00:00Z"], "snow_depth": [0.0]},
+            "hourly": {
+                "time": [f"{d}T{hour:02d}:00Z" for hour in range(24)],
+                "snow_depth": [0.0] * 24,
+            },
         }
         provider = OpenMeteoProvider(fetcher=lambda url, timeout: mock_response, storage=storage)
         df_d = provider.fetch(start_date=d, end_date=d)

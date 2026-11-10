@@ -2,6 +2,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import enTranslations from '../src/i18n/locales/en.json' with { type: 'json' };
 import hiTranslations from '../src/i18n/locales/hi.json' with { type: 'json' };
+import {
+  resolveEffectiveMode,
+  getEffectiveDate,
+  getModeDisplayInfo,
+  getSegmentAccessibilityCue,
+} from '../src/services/liveModeHelper.js';
 
 // ==============================================================================
 // 1. Pending Sync Queue Logic Tests
@@ -483,5 +489,96 @@ describe('Alerts, In-App Boundary & Role Matrix', () => {
     const freshItem = { ...alertItem, is_stale_context: false };
     const freshBadges = getAlertBadges(freshItem, mockT);
     assert.equal(freshBadges.filter((b) => b.type === 'stale_context').length, 0);
+  });
+});
+
+// ==============================================================================
+// 9. Current-Date Live Mode Decision Logic & i18n Completeness (Task 3)
+// ==============================================================================
+describe('Current-Date Live Mode Decision Logic & i18n Completeness (Task 3)', () => {
+  it('distinguishes operational modes: historical vs live vs replay vs off', () => {
+    // 1. Historical selection always yields 'historical' regardless of backend mode
+    assert.equal(resolveEffectiveMode('historical', 'live'), 'historical');
+    assert.equal(resolveEffectiveMode('historical', 'replay'), 'historical');
+    assert.equal(resolveEffectiveMode('historical', 'off'), 'historical');
+
+    // 2. Live selection routes to backend operational mode
+    assert.equal(resolveEffectiveMode('live', 'live'), 'live');
+    assert.equal(resolveEffectiveMode('live', 'replay'), 'replay');
+    assert.equal(resolveEffectiveMode('live', 'off'), 'off');
+    assert.equal(resolveEffectiveMode('live', null), 'live');
+  });
+
+  it('resolves effective date and enforces date picker policy by mode', () => {
+    // Historical mode: date picker active, returns selected historical date
+    const histDate = getEffectiveDate({
+      userMode: 'historical',
+      backendMode: 'live',
+      selectedHistoricalDate: '2023-07-09',
+    });
+    assert.equal(histDate, '2023-07-09');
+
+    const histInfo = getModeDisplayInfo({ effectiveMode: 'historical' });
+    assert.equal(histInfo.isDatePickerAllowed, true, 'Date picker must be allowed in historical mode');
+    assert.equal(histInfo.isExperimental, false);
+
+    // Live mode: date picker disabled, returns live risk as_of or current date
+    const liveDate = getEffectiveDate({
+      userMode: 'live',
+      backendMode: 'live',
+      selectedHistoricalDate: '2023-07-09',
+      liveRiskData: { as_of: '2026-11-09' },
+    });
+    assert.equal(liveDate, '2026-11-09', 'Live mode must use current live risk as_of, never July 2023');
+
+    const liveInfo = getModeDisplayInfo({ effectiveMode: 'live' });
+    assert.equal(liveInfo.isDatePickerAllowed, false, 'Date picker must be disabled in live view');
+    assert.equal(liveInfo.isExperimental, true, 'Live results must stay labelled Experimental');
+
+    // Replay mode: labeled REPLAY, date picker disabled
+    const replayInfo = getModeDisplayInfo({ effectiveMode: 'replay' });
+    assert.equal(replayInfo.isDatePickerAllowed, false);
+    assert.equal(replayInfo.isReplay, true);
+
+    // Off mode: clear disabled state
+    const offInfo = getModeDisplayInfo({ effectiveMode: 'off' });
+    assert.equal(offInfo.isDatePickerAllowed, false);
+    assert.equal(offInfo.isOff, true);
+  });
+
+  it('guarantees Task 3 live i18n keys exist in both EN and HI catalogs', () => {
+    const task3Keys = ['replay_mode', 'mode_off_notice', 'weather_window_end', 'source_label'];
+    for (const k of task3Keys) {
+      assert.ok(enTranslations.live?.[k], `EN missing live key: ${k}`);
+      assert.ok(hiTranslations.live?.[k], `HI missing live key: ${k}`);
+    }
+
+    assert.equal(enTranslations.live.replay_mode, 'REPLAY / simulated scenario');
+    assert.equal(hiTranslations.live.replay_mode, 'रीप्ले / सिम्युलेटेड परिदृश्य');
+
+    assert.equal(enTranslations.live.mode_off_notice, "Live mode not enabled (ROUTEWISE_LIVE_MODE is 'off')");
+    assert.equal(hiTranslations.live.mode_off_notice, "लाइव मोड सक्षम नहीं है (ROUTEWISE_LIVE_MODE 'off' है)");
+
+    assert.equal(enTranslations.live.weather_window_end, 'Weather data window through');
+    assert.equal(hiTranslations.live.weather_window_end, 'मौसम डेटा विंडो समाप्ति');
+
+    assert.equal(enTranslations.live.source_label, 'Source');
+    assert.equal(hiTranslations.live.source_label, 'स्रोत');
+  });
+
+  it('provides distinct accessible non-color cues for UNKNOWN and STALE telemetry', () => {
+    const cueUnknown = getSegmentAccessibilityCue('UNKNOWN', 'MISSING_DATA', false);
+    assert.equal(cueUnknown.symbol, '?');
+    assert.equal(cueUnknown.pattern, 'dotted');
+
+    const cueStale = getSegmentAccessibilityCue('UNKNOWN', 'STALE_DATA', true);
+    assert.equal(cueStale.symbol, '⧗');
+    assert.equal(cueStale.pattern, 'dashed');
+
+    const cueHigh = getSegmentAccessibilityCue('High', 'OK', false);
+    assert.equal(cueHigh.symbol, '▲');
+
+    const cueLow = getSegmentAccessibilityCue('Low', 'OK', false);
+    assert.equal(cueLow.symbol, '○');
   });
 });

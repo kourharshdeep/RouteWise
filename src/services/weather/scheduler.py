@@ -31,11 +31,13 @@ class WeatherScheduler:
         self,
         storage: Optional[WeatherStorage] = None,
         provider: Optional[WeatherProvider] = None,
+        clock: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.storage = storage or weather_storage
         self.provider = provider
         self.mode = settings.live_mode
         self.interval_minutes = settings.live_weather_interval_minutes
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
         self._task: Optional[asyncio.Task] = None
         self._running: bool = False
@@ -65,12 +67,19 @@ class WeatherScheduler:
             provider = self._get_provider()
             logger.info("Executing scheduled weather fetch using provider: %s", provider.provider_name)
 
-            today = datetime.now(timezone.utc).date()
+            now_dt = self.clock()
+            if now_dt.tzinfo is None:
+                now_dt = now_dt.replace(tzinfo=timezone.utc)
+            else:
+                now_dt = now_dt.astimezone(timezone.utc)
+            today = now_dt.date()
             if self.mode == "live":
-                # For live mode, backfill at least 13 days (14 days total) to ensure all days in the
-                # 7-day evaluation window have complete 7-day trailing lookback history without PARTIAL_WINDOW
-                start_date = today - timedelta(days=13)
-                end_date = today
+                # For live mode: today's ongoing UTC day is incomplete. We only ingest COMPLETE
+                # observed days ending on yesterday UTC (last complete day), backfilling 14 complete days
+                # (yesterday - 13 to yesterday) for the 7-day lookback window.
+                yesterday = today - timedelta(days=1)
+                start_date = yesterday - timedelta(days=13)
+                end_date = yesterday
             else:
                 # For replay mode, fetch a known demonstration week or latest available
                 start_date = date(2024, 7, 8)
