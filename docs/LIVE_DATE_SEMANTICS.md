@@ -39,6 +39,17 @@ $$\text{Lookback Window} = [\text{weather\_window\_end} - 6 \text{ days}, \quad 
 
 If any segment lacks complete observations for all 7 dates, or exceeds the missing-data threshold ($25\%$), the corridor evaluates safely to `risk_tier="UNKNOWN"` and `status="MISSING_DATA"`.
 
+### 2.4 Live Date Substitution in Journey Planning (Task 4)
+When a client queries `POST /api/v1/journey/plan` while `ROUTEWISE_LIVE_MODE` is `live`:
+- If the requested date has no live telemetry in `live_risk` (for example, if a commuter or client requests a date lacking live records), the service evaluates the route using the latest available live operational date.
+- The response metadata explicitly signals this substitution:
+  - `date_substituted: true`
+  - `requested_date: "<requested_date>"`
+  - `actual_date: "<latest_live_date>"`
+- In the frontend dashboard, this triggers a clear translated advisory notice:
+  *"Requested date ({{requested}}) had no live telemetry; evaluated using latest live date ({{actual}})."*
+- For historical plans without substitution, `date_substituted` evaluates to `false` (or is omitted via schema `exclude_none`), preserving 100% backward compatibility with historical golden fixtures.
+
 ---
 
 ## 3. Data Freshness and Staleness Rule
