@@ -1224,6 +1224,473 @@ describe('Journey Planner Mode & Schedule Behaviour (Task 3c)', () => {
     assert.equal(hiTranslations.planner.replay_badge, '\u0930\u0940\u092a\u094d\u0932\u0947 / \u0938\u093f\u092e\u094d\u092f\u0941\u0932\u0947\u091f\u0947\u0921 \u092a\u0930\u093f\u0926\u0943\u0936\u094d\u092f');
   });
 
+  // ==============================================================================
+  // 14. Incident De-duplication, Routing Wording, API Clarity & Contrast (Task 4)
+  // ==============================================================================
+  describe('Incident De-duplication, Routing Wording, API Clarity & Contrast (Task 4)', () => {
+    it('enforces incident de-duplication rules (segment, hazard_type, simulation mode, 24h window)', async () => {
+      const { isDuplicateHazardCandidate } = await import('../src/services/incidentHelper.js');
+
+      const baseEvent = {
+        id: 'ev-1',
+        segment_id: 'seg_045',
+        hazard_type: 'landslide',
+        severity: 'critical',
+        status: 'active',
+        is_simulated: false,
+        created_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+        expires_at: new Date(Date.now() + 22 * 3600 * 1000).toISOString(),
+      };
+
+      // 1. Same segment, same hazard type, real report -> DUPLICATE
+      assert.equal(
+        isDuplicateHazardCandidate(baseEvent, {
+          segment_id: 'seg_045',
+          hazard_type: 'landslide',
+          is_simulated: false,
+        }),
+        true,
+        'Identical segment, type, and simulation mode must match duplicate candidate'
+      );
+
+      // 2. Different segment -> NO MERGE
+      assert.equal(
+        isDuplicateHazardCandidate(baseEvent, {
+          segment_id: 'seg_046',
+          hazard_type: 'landslide',
+          is_simulated: false,
+        }),
+        false,
+        'Different segments must never merge'
+      );
+
+      // 3. Different hazard type -> NO MERGE
+      assert.equal(
+        isDuplicateHazardCandidate(baseEvent, {
+          segment_id: 'seg_045',
+          hazard_type: 'flooding',
+          is_simulated: false,
+        }),
+        false,
+        'Different hazard types must never merge'
+      );
+
+      // 4. Simulated candidate vs real event -> NO MERGE
+      assert.equal(
+        isDuplicateHazardCandidate(baseEvent, {
+          segment_id: 'seg_045',
+          hazard_type: 'landslide',
+          is_simulated: true,
+        }),
+        false,
+        'Simulated events and real reports must never merge'
+      );
+
+      // 5. Expired or closed event -> NO MERGE
+      const closedEvent = { ...baseEvent, status: 'closed' };
+      assert.equal(
+        isDuplicateHazardCandidate(closedEvent, {
+          segment_id: 'seg_045',
+          hazard_type: 'landslide',
+          is_simulated: false,
+        }),
+        false,
+        'Closed events must not accept new duplicates'
+      );
+
+      // 6. Outside 24h deduplication window -> NO MERGE
+      const oldEvent = {
+        ...baseEvent,
+        created_at: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(oldEvent, {
+          segment_id: 'seg_045',
+          hazard_type: 'landslide',
+          is_simulated: false,
+        }),
+        false,
+        'Events older than 24h must not merge new reports'
+      );
+
+      // 7. Category fallback (other, snow_or_ice, single_lane_or_obstruction -> road_damage)
+      const fixedNow = new Date('2026-11-11T12:00:00.000Z');
+      const fixedNowMs = fixedNow.getTime();
+
+      const roadDamageEvent = {
+        id: 'ev-road-damage',
+        segment_id: 'seg_045',
+        hazard_type: 'road_damage',
+        severity: 'medium',
+        status: 'active',
+        is_simulated: false,
+        created_at: new Date(fixedNowMs - 2 * 3600 * 1000).toISOString(),
+        expires_at: new Date(fixedNowMs + 22 * 3600 * 1000).toISOString(),
+      };
+
+      // Existing event type road_damage, candidate category other -> true
+      assert.equal(
+        isDuplicateHazardCandidate(
+          roadDamageEvent,
+          {
+            segment_id: 'seg_045',
+            category: 'other',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        true,
+        'Existing road_damage event matches candidate category other via fallback'
+      );
+
+      // Existing event type road_damage, candidate category snow_or_ice -> true
+      assert.equal(
+        isDuplicateHazardCandidate(
+          roadDamageEvent,
+          {
+            segment_id: 'seg_045',
+            category: 'snow_or_ice',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        true,
+        'Existing road_damage event matches candidate category snow_or_ice via fallback'
+      );
+
+      // Existing event type road_damage, candidate category single_lane_or_obstruction -> true
+      assert.equal(
+        isDuplicateHazardCandidate(
+          roadDamageEvent,
+          {
+            segment_id: 'seg_045',
+            category: 'single_lane_or_obstruction',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        true,
+        'Existing road_damage event matches candidate category single_lane_or_obstruction via fallback'
+      );
+
+      // 8. Dual timestamp window
+      // created_at is 30 hours old, last_reported_at is 3 hours old -> true
+      const dualTimestampEvent = {
+        ...roadDamageEvent,
+        created_at: new Date(fixedNowMs - 30 * 3600 * 1000).toISOString(),
+        last_reported_at: new Date(fixedNowMs - 3 * 3600 * 1000).toISOString(),
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          dualTimestampEvent,
+          {
+            segment_id: 'seg_045',
+            hazard_type: 'road_damage',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        true,
+        'created_at 30h old but last_reported_at 3h old must match within window'
+      );
+
+      // Both timestamps are more than 24 hours old -> false
+      const bothExpiredEvent = {
+        ...roadDamageEvent,
+        created_at: new Date(fixedNowMs - 30 * 3600 * 1000).toISOString(),
+        last_reported_at: new Date(fixedNowMs - 26 * 3600 * 1000).toISOString(),
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          bothExpiredEvent,
+          {
+            segment_id: 'seg_045',
+            hazard_type: 'road_damage',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        false,
+        'Both timestamps older than 24h must be rejected'
+      );
+
+      // 9. Invalid timestamp handling
+      // Both timestamps missing -> false
+      const missingTimestampsEvent = {
+        ...roadDamageEvent,
+        created_at: null,
+        last_reported_at: null,
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          missingTimestampsEvent,
+          {
+            segment_id: 'seg_045',
+            hazard_type: 'road_damage',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        false,
+        'Both timestamps missing must be rejected'
+      );
+
+      // Both timestamps invalid -> false
+      const invalidTimestampsEvent = {
+        ...roadDamageEvent,
+        created_at: 'invalid-date',
+        last_reported_at: 'not-a-timestamp',
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          invalidTimestampsEvent,
+          {
+            segment_id: 'seg_045',
+            hazard_type: 'road_damage',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        false,
+        'Both timestamps invalid must be rejected'
+      );
+
+      // Future timestamps -> false
+      const futureCreatedEvent = {
+        ...roadDamageEvent,
+        created_at: new Date(fixedNowMs + 2 * 3600 * 1000).toISOString(),
+        last_reported_at: null,
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          futureCreatedEvent,
+          {
+            segment_id: 'seg_045',
+            hazard_type: 'road_damage',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        false,
+        'Future created_at timestamp must be rejected'
+      );
+
+      const futureLastReportedEvent = {
+        ...roadDamageEvent,
+        created_at: new Date(fixedNowMs - 2 * 3600 * 1000).toISOString(),
+        last_reported_at: new Date(fixedNowMs + 2 * 3600 * 1000).toISOString(),
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          futureLastReportedEvent,
+          {
+            segment_id: 'seg_045',
+            hazard_type: 'road_damage',
+            is_simulated: false,
+          },
+          fixedNow
+        ),
+        false,
+        'Future last_reported_at timestamp must be rejected'
+      );
+
+      const futureCandidate = {
+        segment_id: 'seg_045',
+        hazard_type: 'road_damage',
+        is_simulated: false,
+        created_at: new Date(fixedNowMs + 2 * 3600 * 1000).toISOString(),
+      };
+      assert.equal(
+        isDuplicateHazardCandidate(
+          roadDamageEvent,
+          futureCandidate,
+          fixedNow
+        ),
+        false,
+        'Candidate with future timestamp must be rejected'
+      );
+    });
+
+    it('calculates independent report counts without inflating on same-user repeats', async () => {
+      const { calculateReportCount, formatReportCount } = await import(
+        '../src/services/incidentHelper.js'
+      );
+
+      // Initial event starts with count = 1
+      assert.equal(formatReportCount(1), '1 report');
+      assert.equal(formatReportCount(3), '3 reports');
+
+      // Independent reporter adds to count
+      const res1 = calculateReportCount(1, [101], 102);
+      assert.equal(res1.reportCount, 2);
+      assert.equal(res1.isIndependent, true);
+
+      // Same reporter repeat does not inflate count
+      const res2 = calculateReportCount(2, [101, 102], 101);
+      assert.equal(res2.reportCount, 2);
+      assert.equal(res2.isIndependent, false);
+    });
+
+    it('builds honest routing reason text without mentioning zero segments', async () => {
+      const { buildRoutingReason } = await import('../src/services/incidentHelper.js');
+
+      // 1. Closed segment
+      const rBlocked = buildRoutingReason({ blockingSegments: ['seg_050'] });
+      assert.equal(rBlocked.recommendation, 'HOLD');
+      assert.ok(rBlocked.reason.includes('blocked by 1 closed segment (seg_050)'));
+      assert.ok(!rBlocked.reason.includes('0 closed'));
+
+      // 2. Stale telemetry with 0 missing segments
+      const rStale = buildRoutingReason({ unknownCount: 0, isLiveStale: true });
+      assert.equal(rStale.recommendation, 'NO_DATA');
+      assert.ok(rStale.reason.includes('Live telemetry for corridor segments is stale (>24h).'));
+      assert.ok(!rStale.reason.includes('0 unmonitored'));
+
+      // 3. Unmonitored segments
+      const rUnmon = buildRoutingReason({ unknownCount: 5, isLiveStale: false });
+      assert.equal(rUnmon.recommendation, 'NO_DATA');
+      assert.ok(rUnmon.reason.includes('Route includes 5 unmonitored segments with missing data.'));
+
+      // 4. Peak score high threshold
+      const rPeak = buildRoutingReason({ highCount: 0, maxScore: 0.42 });
+      assert.equal(rPeak.recommendation, 'DELAY');
+      assert.ok(rPeak.reason.includes('Peak segment hazard score (0.42) reaches high disruption threshold (>=0.35)'));
+      assert.ok(!rPeak.reason.includes('0 segment'));
+
+      // 5. Baseline clear
+      const rClear = buildRoutingReason({ highCount: 0, medCount: 0, unknownCount: 0, maxScore: 0.05 });
+      assert.equal(rClear.recommendation, 'PROCEED');
+      assert.ok(rClear.reason.includes('Corridor baseline clear (<0.10)'));
+    });
+
+    it('extracts date substitution metadata when live date substitution occurs', async () => {
+      const { getSubstitutionNotice } = await import('../src/services/incidentHelper.js');
+
+      // Substituted plan
+      const notice = getSubstitutionNotice({
+        date_substituted: true,
+        requested_date: '2023-07-09',
+        actual_date: '2026-11-10',
+      });
+      assert.ok(notice);
+      assert.equal(notice.isSubstituted, true);
+      assert.equal(notice.requestedDate, '2023-07-09');
+      assert.equal(notice.actualDate, '2026-11-10');
+
+      // Unsubstituted plan
+      const noNotice = getSubstitutionNotice({
+        date_substituted: false,
+        requested_date: '2026-11-10',
+        actual_date: '2026-11-10',
+      });
+      assert.equal(noNotice, null);
+    });
+
+    it('guarantees Task 4 i18n keys exist and match in both EN and HI catalogs', () => {
+      // 1. Inspector active hazards key
+      assert.ok(enTranslations.inspector?.active_hazards, 'EN missing inspector.active_hazards');
+      assert.ok(hiTranslations.inspector?.active_hazards, 'HI missing inspector.active_hazards');
+      assert.equal(enTranslations.inspector.active_hazards, 'Active Corridor Hazards');
+      assert.equal(hiTranslations.inspector.active_hazards, 'सक्रिय कॉरिडोर खतरे');
+
+      // 2. Date substituted notice key
+      assert.ok(enTranslations.journey?.date_substituted_notice, 'EN missing journey.date_substituted_notice');
+      assert.ok(hiTranslations.journey?.date_substituted_notice, 'HI missing journey.date_substituted_notice');
+      assert.ok(enTranslations.journey.date_substituted_notice.includes('{{requested}}'));
+      assert.ok(hiTranslations.journey.date_substituted_notice.includes('{{requested}}'));
+
+      // 3. Events report count keys
+      assert.ok(enTranslations.events?.reports_count, 'EN missing events.reports_count');
+      assert.ok(hiTranslations.events?.reports_count, 'HI missing events.reports_count');
+      assert.ok(enTranslations.events?.reports_count_plural, 'EN missing events.reports_count_plural');
+      assert.ok(hiTranslations.events?.reports_count_plural, 'HI missing events.reports_count_plural');
+      assert.ok(enTranslations.events?.last_reported, 'EN missing events.last_reported');
+      assert.ok(hiTranslations.events?.last_reported, 'HI missing events.last_reported');
+      assert.ok(enTranslations.events?.independent_reports, 'EN missing events.independent_reports');
+      assert.ok(hiTranslations.events?.independent_reports, 'HI missing events.independent_reports');
+
+      assert.equal(enTranslations.events.reports_count, '{{count}} report');
+      assert.equal(hiTranslations.events.reports_count, '{{count}} रिपोर्ट');
+      assert.equal(enTranslations.events.reports_count_plural, '{{count}} reports');
+      assert.equal(hiTranslations.events.reports_count_plural, '{{count}} रिपोर्टें');
+    });
+
+    it('SSR mounts SegmentInspector across all 4 modes with active hazard events', async () => {
+      const React = (await import('react')).default;
+      const { renderToString } = await import('react-dom/server');
+      const { createServer } = await import('vite');
+
+      const server = await createServer({
+        root: process.cwd(),
+        appType: 'custom',
+        server: { middlewareMode: true },
+        optimizeDeps: { noDiscovery: true },
+      });
+
+      try {
+        const SegmentInspector = (await server.ssrLoadModule('./src/components/SegmentInspector.jsx')).default;
+        const modes = ['historical', 'live', 'replay', 'off'];
+
+        for (const mode of modes) {
+          const mockRiskData = {
+            mode,
+            as_of: '2026-11-10',
+            segments: [
+              {
+                segment_id: 'seg_045',
+                risk_score: 0.12,
+                risk_tier: 'Medium',
+                operational_status: 'RESTRICTED',
+                active_events: [
+                  {
+                    id: 'ev-test-1',
+                    hazard_type: 'shooting_stones',
+                    severity: 'high',
+                    status: 'active',
+                    origin: 'field_report',
+                    is_simulated: false,
+                    report_count: 3,
+                    last_reported_at: '2026-11-10T12:00:00Z',
+                  },
+                ],
+              },
+            ],
+          };
+
+          const mockGeojson = {
+            features: [
+              {
+                id: 'seg_045',
+                properties: {
+                  name: 'Maroog Sector 45',
+                  highway: 'primary',
+                  length_m: 350,
+                  slope: 0.08,
+                  elevation_m: 1100,
+                },
+              },
+            ],
+          };
+
+          const rendered = renderToString(
+            React.createElement(SegmentInspector, {
+              selectedSegment: 'seg_045',
+              riskData: mockRiskData,
+              selectedDate: '2026-11-10',
+              geojson: mockGeojson,
+            })
+          );
+
+          assert.ok(rendered.length > 0, `SegmentInspector must render in mode ${mode}`);
+          assert.ok(rendered.includes('Active Corridor Hazards'), `Must show active hazards header in mode ${mode}`);
+          assert.ok(rendered.includes('3 reports'), `Must display report count in mode ${mode}`);
+        }
+      } finally {
+        await server.close();
+      }
+    });
+  });
+
   it('SSR mounts JourneyPlanner in all 4 modes (live, replay, historical, off)', async () => {
     const React = (await import('react')).default;
     const { renderToString } = await import('react-dom/server');

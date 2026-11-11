@@ -50,7 +50,7 @@ export default function Navigation({ theme, setTheme, health, activeAlertCount =
       id: 'patrol',
       path: '/patrol',
       label: t('nav.patrol'),
-      icon: <Shield size={18} style={{ color: 'var(--accent-primary)' }} />,
+      icon: <Shield size={18} style={{ color: 'var(--accent-primary-fg)' }} />,
     });
   }
 

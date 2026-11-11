@@ -3104,7 +3104,7 @@ body,
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: var(--accent-primary);
+  background-color: var(--accent-primary-fg);
   display: inline-block;
 }
 
@@ -3537,7 +3537,7 @@ body,
 }
 
 .cat-chip.active {
-  border-color: var(--accent-primary);
+  border-color: var(--accent-primary-fg);
   background-color: var(--info-bg);
   color: var(--accent-secondary);
   font-weight: 700;
@@ -3698,7 +3698,7 @@ body,
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background-color: var(--accent-primary);
+  background-color: var(--accent-primary-fg);
   border: 2px solid var(--bg-surface);
 }
 
@@ -4610,8 +4610,8 @@ body,
 }
 
 .route-alternative-card.highlight {
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 1px var(--accent-primary);
+  border-color: var(--accent-primary-fg);
+  box-shadow: 0 0 0 1px var(--accent-primary-fg);
 }
 
 .route-alt-header {
@@ -4820,7 +4820,7 @@ body,
 
 .alert-bell-btn:hover {
   background: var(--bg-hover, rgba(255, 255, 255, 0.05));
-  border-color: var(--accent-primary);
+  border-color: var(--accent-primary-fg);
 }
 
 .alert-count-badge {

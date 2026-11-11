@@ -212,3 +212,17 @@ The following strings were added for mode-aware journey planning, live operation
 | planner.weather_window_through | Weather window through | मौसम डेटा विंडो तक | Weather observation window label |
 | planner.experimental_warning | Experimental - not validated for life-safety | प्रायोगिक - जीवन सुरक्षा के लिए मान्य नहीं | Life-safety honesty disclaimer |
 | planner.historical_benchmarks | Historical Benchmark Spells: | ऐतिहासिक बेंचमार्क घटनाएं: | Benchmark buttons label |
+
+## Task 4: Incident De-duplication, Routing Wording & Live Date Substitution (Unreviewed)
+
+The following strings were added for incident report aggregation, live date substitution notices, and active corridor hazard inspection, and are explicitly marked as **Unreviewed**:
+
+| Key | English String | Hindi Localization (Unreviewed) | Notes |
+| :--- | :--- | :--- | :--- |
+| inspector.active_hazards | Active Corridor Hazards | सक्रिय कॉरिडोर खतरे | Header for active hazard events in segment inspector |
+| journey.date_substituted_notice | Requested date ({{requested}}) had no live telemetry; evaluated using latest live date ({{actual}}). | अनुरोधित तिथि ({{requested}}) के लिए कोई लाइव टेलीमेट्री नहीं थी; नवीनतम लाइव तिथि ({{actual}}) का उपयोग करके मूल्यांकन किया गया। | Notification when live planner substitutes requested date |
+| events.reports_count | {{count}} report | {{count}} रिपोर्ट | Single report count on active hazard pin / inspector |
+| events.reports_count_plural | {{count}} reports | {{count}} रिपोर्टें | Multiple reports count on active hazard pin / inspector |
+| events.last_reported | Last reported: {{time}} | अंतिम रिपोर्ट: {{time}} | Last report timestamp for active hazard |
+| events.independent_reports | {{count}} independent report(s) | {{count}} स्वतंत्र रिपोर्ट | Audit report counter for deduplicated hazard events |
+| inspector.latest_verified_report | Latest verified report | नवीनतम सत्यापित रिपोर्ट | Timestamp label indicating the most recent verified corroborating report |

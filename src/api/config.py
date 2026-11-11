@@ -113,6 +113,7 @@ class Settings:
     )
     live_db_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_LIVE_DB_PATH", "data/runtime/routewise_live.db")))
     live_weather_interval_minutes: int = field(default_factory=lambda: int(os.getenv("LIVE_WEATHER_INTERVAL_MINUTES", "60")))
+    dedup_window_hours: float = field(default_factory=lambda: float(os.getenv("ROUTEWISE_DEDUP_WINDOW_HOURS", "24.0")))
 
     # Optional External AI API Key (never exposed to frontend)
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))

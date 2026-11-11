@@ -34,6 +34,8 @@ class HazardEventItem(BaseModel):
     is_simulated: bool
     badge: str = Field(..., description="'SIMULATED' for operator simulations, 'VERIFIED' for confirmed reports")
     source_report_id: Optional[str] = None
+    report_count: int = Field(1, description="Number of independent field reports linked to this incident")
+    last_reported_at: Optional[str] = Field(None, description="ISO timestamp of most recent linked report")
     starts_at: str
     expires_at: str
     created_by: Optional[int] = None

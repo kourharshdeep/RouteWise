@@ -132,3 +132,23 @@ class JourneyPlanResponse(BaseModel):
         default=None,
         description="Multi-objective risk-penalized calculation",
     )
+    requested_date: Optional[str] = Field(
+        default=None,
+        description="The original journey date requested by the client",
+    )
+    date_substituted: bool = Field(
+        default=False,
+        description="True if requested date was substituted with the latest available live risk date",
+    )
+    actual_date: Optional[str] = Field(
+        default=None,
+        description="The actual telemetry date used to evaluate the journey plan",
+    )
+
+    def model_dump(self, *args, **kwargs):
+        d = super().model_dump(*args, **kwargs)
+        if not self.date_substituted and self.requested_date is None and self.actual_date is None:
+            d.pop("requested_date", None)
+            d.pop("date_substituted", None)
+            d.pop("actual_date", None)
+        return d

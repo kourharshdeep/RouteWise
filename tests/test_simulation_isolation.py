@@ -320,7 +320,7 @@ def test_legacy_database_without_is_simulated_column(tmp_path, set_live_mode):
             """
             INSERT INTO hazard_event VALUES (
                 'ev_legacy_1', 'seg_001', 'road_damage', 'medium', 'active',
-                'field_report', NULL, '2026-11-10T00:00:00Z', '2026-11-11T00:00:00Z', NULL, '2026-11-10T00:00:00Z'
+                'field_report', NULL, '2026-11-10T00:00:00Z', '2099-01-01T00:00:00Z', NULL, '2026-11-10T00:00:00Z'
             );
             """
         )

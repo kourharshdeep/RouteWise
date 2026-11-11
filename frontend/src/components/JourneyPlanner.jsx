@@ -19,6 +19,7 @@ import {
   Shield,
   Layers,
   Sparkles,
+  Info,
 } from 'lucide-react';
 
 export default function JourneyPlanner({
@@ -295,7 +296,7 @@ export default function JourneyPlanner({
       {lastRouteUpdate && planResult && mode === 'live' && (
         <div className="route-update-notification">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Clock size={16} style={{ color: 'var(--accent-primary)' }} />
+            <Clock size={16} style={{ color: 'var(--accent-primary-fg)' }} />
             <span>
               <strong>Route updated at {lastRouteUpdate.time}</strong> — <em>{lastRouteUpdate.reason}</em>
             </span>
@@ -535,6 +536,35 @@ export default function JourneyPlanner({
             </div>
           )}
 
+          {/* Live Mode Date Substitution Notice (Task 4) */}
+          {planResult.date_substituted && (
+            <div
+              className="date-substitution-notice"
+              data-testid="date-substitution-notice"
+              role="note"
+              style={{
+                background: 'rgba(3, 105, 161, 0.12)',
+                color: 'var(--accent-primary-fg)',
+                border: '1px solid var(--accent-primary-fg)',
+                borderRadius: 8,
+                padding: '8px 12px',
+                margin: '8px 0',
+                fontSize: 12.5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Info size={15} aria-hidden="true" style={{ flexShrink: 0 }} />
+              <span>
+                {t('journey.date_substituted_notice', {
+                  requested: planResult.requested_date || 'N/A',
+                  actual: planResult.actual_date || planResult.journey_date || 'N/A',
+                })}
+              </span>
+            </div>
+          )}
+
           {/* Operational Recommendation Banner (Task 4) */}
           {planResult.recommendation && renderRecommendation(
             planResult.recommendation,
@@ -604,7 +634,7 @@ export default function JourneyPlanner({
                 {planResult.risk_aware_route && (
                   <div className="route-alternative-card highlight">
                     <div className="route-alt-header">
-                      <strong style={{ fontSize: 13, color: 'var(--accent-primary)' }}>Risk-Aware Route (ST-GNN)</strong>
+                      <strong style={{ fontSize: 13, color: 'var(--accent-primary-fg)' }}>Risk-Aware Route (ST-GNN)</strong>
                       <span className={`badge ${planResult.risk_aware_route.is_passable ? 'badge-connected' : 'badge-disconnected'}`}>
                         {planResult.risk_aware_route.is_passable ? 'Passable' : 'Hold / Blocked'}
                       </span>

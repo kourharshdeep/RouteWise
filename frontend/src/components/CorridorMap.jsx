@@ -346,7 +346,7 @@ export default function CorridorMap({
                           <>
                             <br />
                             <strong>Hazards:</strong>{' '}
-                            {r.active_events.map((e) => e.hazard_type).join(', ')}
+                            {r.active_events.map((e) => `${e.hazard_type}${e.report_count > 1 ? ` (${e.report_count} reports)` : ''}`).join(', ')}
                           </>
                         )}
                       </div>

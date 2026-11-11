@@ -63,7 +63,7 @@ export default function AlertDrawer({
       case 'warning':
         return <AlertTriangle size={18} style={{ color: 'var(--warning, #f97316)' }} />;
       case 'advisory':
-        return <Info size={18} style={{ color: 'var(--accent-primary, #3b82f6)' }} />;
+        return <Info size={18} style={{ color: 'var(--accent-primary-fg, #38bdf8)' }} />;
       default:
         return <Info size={18} style={{ color: 'var(--text-muted)' }} />;
     }
@@ -82,7 +82,7 @@ export default function AlertDrawer({
         {/* Drawer Header */}
         <div className="alert-drawer-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Bell size={18} style={{ color: 'var(--accent-primary)' }} />
+            <Bell size={18} style={{ color: 'var(--accent-primary-fg)' }} />
             <h3 style={{ margin: 0, fontSize: 16 }}>Corridor Active Alerts ({activeAlerts.length})</h3>
           </div>
           <button

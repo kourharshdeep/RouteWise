@@ -84,7 +84,9 @@
     "no_reports": "No field incidents recorded on this segment.",
     "view_on_map": "View on Map",
     "verified_badge": "Verified by Patrol",
-    "unverified_badge": "Unverified Submission"
+    "unverified_badge": "Unverified Submission",
+    "active_hazards": "Active Corridor Hazards",
+    "latest_verified_report": "Latest verified report"
   },
   "drawer": {
     "title": "Segment Detailed Analysis",
@@ -176,7 +178,8 @@
     "assumed_speed_label": "Estimated Transit Time (Assumed Speed)",
     "date_out_of_range": "Observation date is outside the supported historical window ({{minDate}} to {{maxDate}}).",
     "plan_auto_refreshed": "Plan auto-refreshed at {{time}}",
-    "recommendation_changed_notice": "Recommendation changed from {{oldRec}} to {{newRec}} following live telemetry update"
+    "recommendation_changed_notice": "Recommendation changed from {{oldRec}} to {{newRec}} following live telemetry update",
+    "date_substituted_notice": "Requested date ({{requested}}) had no live telemetry; evaluated using latest live date ({{actual}})."
   },
   "live": {
     "toggle_label": "Operational Mode",
@@ -248,6 +251,12 @@
     "title": "Something went wrong",
     "message": "An unexpected error occurred while rendering the dashboard.",
     "reload": "Reload Application"
+  },
+  "events": {
+    "reports_count": "{{count}} report",
+    "reports_count_plural": "{{count}} reports",
+    "last_reported": "Last reported: {{time}}",
+    "independent_reports": "{{count}} independent report(s)"
   },
   "planner": {
     "live_badge": "Live Operational Advisory • Experimental - not validated",

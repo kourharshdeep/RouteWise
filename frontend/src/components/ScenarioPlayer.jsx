@@ -13,7 +13,7 @@ import { stepReplayScenario } from '../services/api';
 
 const SCENARIO_LABELS = [
     { step: 0, date: '2023-07-06', label: 'Step 0: Clear Baseline', color: 'var(--success, #22c55e)' },
-    { step: 1, date: '2023-07-07', label: 'Step 1: Rain Onset', color: 'var(--accent-primary, #3b82f6)' },
+    { step: 1, date: '2023-07-07', label: 'Step 1: Rain Onset', color: 'var(--accent-primary-fg, #38bdf8)' },
     { step: 2, date: '2023-07-08', label: 'Step 2: Heavy Storm', color: 'var(--warning, #f97316)' },
     { step: 3, date: '2023-07-09', label: 'Step 3: Peak Cloudburst', color: 'var(--danger, #ef4444)' },
     { step: 4, date: '2023-07-10', label: 'Step 4: Post-Storm Clearance', color: 'var(--success, #22c55e)' },
@@ -56,7 +56,7 @@ export default function ScenarioPlayer({ onScenarioStepped }) {
     <div className="scenario-player-card">
       <div className="scenario-player-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <CloudRain size={18} style={{ color: 'var(--accent-primary)' }} />
+          <CloudRain size={18} style={{ color: 'var(--accent-primary-fg)' }} />
           <strong>Demo Replay: Multi-Day Storm Scenario (July 2023 Cloudburst)</strong>
         </div>
         <span className="badge badge-pill" style={{ fontSize: 10, borderColor: '#f97316', color: '#f97316' }}>

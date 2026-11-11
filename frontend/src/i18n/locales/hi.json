@@ -84,7 +84,9 @@
     "no_reports": "इस खंड से जुड़ी कोई घटना रिपोर्ट दर्ज नहीं है।",
     "view_on_map": "मानचित्र पर देखें",
     "verified_badge": "गश्ती दल द्वारा सत्यापित",
-    "unverified_badge": "असत्यापित प्रस्तुति"
+    "unverified_badge": "असत्यापित प्रस्तुति",
+    "active_hazards": "सक्रिय कॉरिडोर खतरे",
+    "latest_verified_report": "नवीनतम सत्यापित रिपोर्ट"
   },
   "drawer": {
     "title": "खंड का विस्तृत विश्लेषण",
@@ -176,7 +178,8 @@
     "assumed_speed_label": "अनुमानित पारगमन समय (कल्पित गति)",
     "date_out_of_range": "अवलोकन तिथि समर्थित ऐतिहासिक सीमा ({{minDate}} से {{maxDate}}) से बाहर है।",
     "plan_auto_refreshed": "योजना {{time}} पर स्वतः रीफ़्रेश हुई",
-    "recommendation_changed_notice": "???? ?????????? ????? ?? ??? ??????? {{oldRec}} ?? ????? {{newRec}} ?? ??"
+    "recommendation_changed_notice": "लाइव टेलीमेट्री अपडेट के बाद सिफारिश {{oldRec}} से बदलकर {{newRec}} हो गई",
+    "date_substituted_notice": "अनुरोधित तिथि ({{requested}}) के लिए कोई लाइव टेलीमेट्री नहीं थी; नवीनतम लाइव तिथि ({{actual}}) का उपयोग करके मूल्यांकन किया गया।"
   },
   "live": {
     "toggle_label": "परिचालन मोड",
@@ -248,6 +251,12 @@
     "title": "कुछ गलत हो गया",
     "message": "डैशबोर्ड रेंडर करते समय एक अप्रत्याशित त्रुटि उत्पन्न हुई।",
     "reload": "एप्लिकेशन पुनः लोड करें"
+  },
+  "events": {
+    "reports_count": "{{count}} रिपोर्ट",
+    "reports_count_plural": "{{count}} रिपोर्टें",
+    "last_reported": "अंतिम रिपोर्ट: {{time}}",
+    "independent_reports": "{{count}} स्वतंत्र रिपोर्ट"
   },
   "planner": {
     "live_badge": "लाइव परिचालन परामर्श • प्रायोगिक - गैर-सत्यापित",

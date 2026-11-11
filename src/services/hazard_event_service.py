@@ -36,6 +36,15 @@ VALID_PRESETS = {
 }
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Checks whether a table exists in the database schema."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
 class HazardEventService:
     """Manages active hazard events, auto-expiry audit trails, and derived operational status."""
 
@@ -89,6 +98,8 @@ class HazardEventService:
                         origin TEXT NOT NULL,
                         is_simulated INTEGER NOT NULL DEFAULT 0,
                         source_report_id TEXT,
+                        report_count INTEGER NOT NULL DEFAULT 1,
+                        last_reported_at TEXT,
                         starts_at TEXT NOT NULL,
                         expires_at TEXT NOT NULL,
                         created_by INTEGER,
@@ -103,6 +114,12 @@ class HazardEventService:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_sim ON hazard_event(is_simulated);")
                 if "source_report_id" in cols:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_report ON hazard_event(source_report_id);")
+                if "report_count" not in cols:
+                    conn.execute("ALTER TABLE hazard_event ADD COLUMN report_count INTEGER NOT NULL DEFAULT 1;")
+                if "last_reported_at" not in cols:
+                    conn.execute("ALTER TABLE hazard_event ADD COLUMN last_reported_at TEXT;")
+                    conn.execute("UPDATE hazard_event SET last_reported_at = created_at WHERE last_reported_at IS NULL;")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hazard_event_dedup ON hazard_event(segment_id, hazard_type, status);")
 
                 # Audit trail table for lifecycle actions (create, refresh, close, auto-expire)
                 conn.execute(
@@ -170,11 +187,15 @@ class HazardEventService:
         if status_value == "submitted":
             return None
 
+        # Severity ranking for "severity is never lowered"
+        SEVERITY_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
         # Resolved or rejected reports close existing active events
         if status_value in ("resolved", "rejected"):
             with self._get_connection() as conn:
+                has_reports = _has_table(conn, "reports")
                 existing = conn.execute(
-                    "SELECT id FROM hazard_event WHERE source_report_id = ? AND status = 'active'",
+                    "SELECT id, source_report_id FROM hazard_event WHERE source_report_id = ? AND status = 'active'",
                     (report_id,),
                 ).fetchall()
                 for r in existing:
@@ -190,6 +211,17 @@ class HazardEventService:
                         """,
                         (eid, f"Field report transitioned to {status_value}", actor_id, now_iso),
                     )
+                    if status_value == "resolved":
+                        if has_reports:
+                            conn.execute(
+                                """
+                                UPDATE reports
+                                SET status = 'resolved', updated_at = ?
+                                WHERE (hazard_event_id = ? OR (duplicate_of IS NOT NULL AND duplicate_of = ?))
+                                  AND status IN ('submitted', 'verified', 'assigned')
+                                """,
+                                (now_iso, eid, r["source_report_id"] or report_id),
+                            )
                 conn.commit()
             if existing:
                 self._broadcast_event_change("close", existing[0]["id"])
@@ -201,55 +233,201 @@ class HazardEventService:
                 logger.warning("Cannot create hazard event for report %s: no segment_id attached.", report_id)
                 return None
 
-            # Map category to standardized hazard_type
+            # Map category to standardized hazard_type without collapsing unmapped types
             cat_norm = category.lower().replace(" ", "_").replace("-", "_")
             hazard_type = cat_norm if cat_norm in VALID_PRESETS else "road_damage"
-            severity = "critical" if hazard_type in ("landslide", "flooding") else "high"
+            severity = VALID_PRESETS.get(hazard_type, {}).get("severity", "critical" if hazard_type in ("landslide", "flooding") else "medium")
             expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+            sim_val = 1 if is_simulated else 0
+            dedup_hours = getattr(settings, "dedup_window_hours", 24.0)
+            dedup_window_start = (datetime.now(timezone.utc) - timedelta(hours=dedup_hours)).isoformat()
 
             with self._get_connection() as conn:
+                has_reports = _has_table(conn, "reports")
                 existing = conn.execute(
-                    "SELECT id FROM hazard_event WHERE source_report_id = ? AND status = 'active'",
+                    """
+                    SELECT id, severity, report_count, last_reported_at, source_report_id, expires_at
+                    FROM hazard_event
+                    WHERE source_report_id = ? AND status = 'active'
+                    """,
                     (report_id,),
                 ).fetchone()
 
-                if existing:
-                    # Refresh existing event
-                    event_id = existing["id"]
-                    conn.execute(
-                        "UPDATE hazard_event SET expires_at = ?, status = 'active' WHERE id = ?",
-                        (expires_at, event_id),
-                    )
-                    conn.execute(
+                if not existing:
+                    # Look for duplicate active event on the same segment considering created_at and last_reported_at
+                    existing = conn.execute(
                         """
-                        INSERT INTO hazard_event_history (event_id, action, note, actor_id, timestamp)
-                        VALUES (?, 'REFRESHED', ?, ?, ?)
+                        SELECT id, severity, report_count, last_reported_at, source_report_id, expires_at
+                        FROM hazard_event
+                        WHERE segment_id = ?
+                          AND hazard_type = ?
+                          AND COALESCE(is_simulated, 0) = ?
+                          AND status = 'active'
+                          AND expires_at > ?
+                          AND (created_at >= ? OR (last_reported_at IS NOT NULL AND last_reported_at >= ?))
+                        ORDER BY created_at ASC
+                        LIMIT 1
                         """,
-                        (event_id, f"Refreshed due to report status {status_value}", actor_id, now_iso),
-                    )
+                        (segment_id, hazard_type, sim_val, now_iso, dedup_window_start, dedup_window_start),
+                    ).fetchone()
+
+                if existing:
+                    event_id = existing["id"]
+                    is_same_source = (existing["source_report_id"] == report_id)
+
+                    if is_same_source:
+                        if status_value == "verified":
+                            conn.execute(
+                                "UPDATE hazard_event SET expires_at = ?, status = 'active' WHERE id = ?",
+                                (expires_at, event_id),
+                            )
+                        else:
+                            conn.execute(
+                                "UPDATE hazard_event SET status = 'active' WHERE id = ?",
+                                (event_id,),
+                            )
+                        conn.execute(
+                            """
+                            INSERT INTO hazard_event_history (event_id, action, note, actor_id, timestamp)
+                            VALUES (?, 'REFRESHED', ?, ?, ?)
+                            """,
+                            (event_id, f"Refreshed due to report status {status_value}", actor_id, now_iso),
+                        )
+                        action = "refresh"
+                    else:
+                        cur_reporter_id = None
+                        report_created_at = now_iso
+                        is_already_linked = False
+
+                        if has_reports:
+                            cur_rep = conn.execute(
+                                "SELECT reporter_id, created_at, hazard_event_id FROM reports WHERE id = ?",
+                                (report_id,),
+                            ).fetchone()
+                            if cur_rep:
+                                cur_reporter_id = cur_rep["reporter_id"]
+                                report_created_at = cur_rep["created_at"] or now_iso
+                        # Guest / anonymous report rule: reporter_id None or <= 0 is not an independent verified reporter
+                        is_independent = False
+                        if status_value == "verified":
+                            if cur_reporter_id is not None and cur_reporter_id > 0:
+                                existing_reporters = set()
+                                if has_reports:
+                                    rep_rows = conn.execute(
+                                        """
+                                        SELECT reporter_id FROM reports
+                                        WHERE (hazard_event_id = ? OR (duplicate_of IS NOT NULL AND duplicate_of = ?) OR id = ?)
+                                          AND id != ?
+                                          AND status IN ('verified', 'assigned', 'resolved')
+                                          AND reporter_id IS NOT NULL
+                                        """,
+                                        (event_id, existing["source_report_id"], existing["source_report_id"], report_id),
+                                    ).fetchall()
+                                    for rr in rep_rows:
+                                        if rr["reporter_id"] is not None and rr["reporter_id"] > 0:
+                                            existing_reporters.add(rr["reporter_id"])
+                                is_independent = (cur_reporter_id not in existing_reporters)
+                            elif not has_reports and not is_same_source:
+                                # In legacy schemas without reports table, each distinct report_id counts once
+                                is_independent = True
+
+                        cur_count = int(existing["report_count"]) if existing["report_count"] is not None else 1
+                        new_count = cur_count + (1 if is_independent else 0)
+
+                        old_sev = existing["severity"]
+                        if SEVERITY_RANK.get(severity, 0) > SEVERITY_RANK.get(old_sev, 0):
+                            new_sev = severity
+                        else:
+                            new_sev = old_sev
+
+                        if status_value == "verified":
+                            new_last_rep = max(existing["last_reported_at"] or now_iso, report_created_at or now_iso)
+                            new_expires = max(existing["expires_at"], expires_at)
+                        else:
+                            new_last_rep = existing["last_reported_at"]
+                            new_expires = existing["expires_at"]
+
+
+                        conn.execute(
+                            """
+                            UPDATE hazard_event
+                            SET report_count = ?,
+                                last_reported_at = ?,
+                                severity = ?,
+                                expires_at = ?,
+                                status = 'active'
+                            WHERE id = ?
+                            """,
+                            (new_count, new_last_rep, new_sev, new_expires, event_id),
+                        )
+
+                        if has_reports:
+                            conn.execute(
+                                """
+                                UPDATE reports
+                                SET duplicate_of = ?,
+                                    hazard_event_id = ?
+                                WHERE id = ?
+                                """,
+                                (existing["source_report_id"] if existing["source_report_id"] else None, event_id, report_id),
+                            )
+
+                        conn.execute(
+                            """
+                            INSERT INTO hazard_event_history (event_id, action, note, actor_id, timestamp)
+                            VALUES (?, 'REPORT_LINKED', ?, ?, ?)
+                            """,
+                            (
+                                event_id,
+                                f"Report {report_id} linked (independent={is_independent}, count={new_count}, severity={new_sev})",
+                                actor_id,
+                                now_iso,
+                            ),
+                        )
+                        action = "refresh"
                 else:
-                    # Create new event
                     event_id = str(uuid.uuid4())
+                    rep_time = now_iso
+                    if has_reports:
+                        cur_rep = conn.execute(
+                            "SELECT created_at FROM reports WHERE id = ?",
+                            (report_id,),
+                        ).fetchone()
+                        if cur_rep and cur_rep["created_at"]:
+                            rep_time = cur_rep["created_at"]
+
                     conn.execute(
                         """
                         INSERT INTO hazard_event (
                             id, segment_id, hazard_type, severity, status, origin,
-                            is_simulated, source_report_id, starts_at, expires_at, created_by, created_at
-                        ) VALUES (?, ?, ?, ?, 'active', 'field_report', ?, ?, ?, ?, ?, ?)
+                            is_simulated, source_report_id, report_count, last_reported_at,
+                            starts_at, expires_at, created_by, created_at
+                        ) VALUES (?, ?, ?, ?, 'active', 'field_report', ?, ?, 1, ?, ?, ?, ?, ?)
                         """,
                         (
                             event_id,
                             segment_id,
                             hazard_type,
                             severity,
-                            1 if is_simulated else 0,
+                            sim_val,
                             report_id,
+                            rep_time,
                             now_iso,
                             expires_at,
                             actor_id,
                             now_iso,
                         ),
                     )
+                    if has_reports:
+                        conn.execute(
+                            """
+                            UPDATE reports
+                            SET hazard_event_id = ?, duplicate_of = NULL
+                            WHERE id = ?
+                            """,
+                            (event_id, report_id),
+                        )
+
                     conn.execute(
                         """
                         INSERT INTO hazard_event_history (event_id, action, note, actor_id, timestamp)
@@ -257,8 +435,10 @@ class HazardEventService:
                         """,
                         (event_id, actor_id, now_iso),
                     )
+                    action = "create"
+
                 conn.commit()
-            self._broadcast_event_change("create_or_refresh", event_id)
+            self._broadcast_event_change(action, event_id)
             return event_id
 
         return None
@@ -316,14 +496,16 @@ class HazardEventService:
                 """
                 INSERT INTO hazard_event (
                     id, segment_id, hazard_type, severity, status, origin,
-                    is_simulated, source_report_id, starts_at, expires_at, created_by, created_at
-                ) VALUES (?, ?, ?, ?, 'active', 'simulated', 1, NULL, ?, ?, ?, ?)
+                    is_simulated, source_report_id, report_count, last_reported_at,
+                    starts_at, expires_at, created_by, created_at
+                ) VALUES (?, ?, ?, ?, 'active', 'simulated', 1, NULL, 1, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
                     segment_id,
                     norm_preset,
                     eff_severity,
+                    now_iso,
                     now_iso,
                     expires_iso,
                     user_id,
@@ -357,6 +539,8 @@ class HazardEventService:
             "origin": "simulated",
             "is_simulated": True,
             "badge": "SIMULATED",
+            "report_count": 1,
+            "last_reported_at": now_iso,
             "starts_at": now_iso,
             "expires_at": expires_iso,
             "created_by": user_id,
@@ -430,6 +614,8 @@ class HazardEventService:
         events = []
         for r in rows:
             is_sim = bool(r["is_simulated"]) if ("is_simulated" in r.keys() and r["is_simulated"] is not None) else False
+            rep_count = int(r["report_count"]) if ("report_count" in r.keys() and r["report_count"] is not None) else 1
+            last_rep = r["last_reported_at"] if ("last_reported_at" in r.keys() and r["last_reported_at"] is not None) else r["created_at"]
             events.append({
                 "id": r["id"],
                 "segment_id": r["segment_id"],
@@ -440,6 +626,8 @@ class HazardEventService:
                 "is_simulated": is_sim,
                 "badge": "SIMULATED" if is_sim else "VERIFIED",
                 "source_report_id": r["source_report_id"],
+                "report_count": rep_count,
+                "last_reported_at": last_rep,
                 "starts_at": r["starts_at"],
                 "expires_at": r["expires_at"],
                 "created_by": r["created_by"],

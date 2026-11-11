@@ -325,6 +325,9 @@ class JourneyService:
         blocking_segments: List[str] = []
         is_live_stale = False
         journey_date_str = req.date
+        date_substituted = False
+        requested_date = None
+        actual_date = None
 
         if mode == "live":
             from src.services.live_risk_service import MAX_DATA_AGE_HOURS, live_risk_service
@@ -342,8 +345,12 @@ class JourneyService:
                     req.date,
                 )
                 live_risk = live_risk_service.get_latest_live_risk(as_of=None, eval_time=now)
+                date_substituted = True
+                requested_date = req.date
 
             journey_date_str = live_risk.get("as_of") or req.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if date_substituted:
+                actual_date = journey_date_str
 
             for seg in live_risk.get("segments", []):
                 risk_lookup[seg["segment_id"]] = seg
@@ -549,16 +556,29 @@ class JourneyService:
         # 7. Operational Recommendation Decision Matrix
         if blocking_segments:
             recommendation = "HOLD"
-            recommendation_reason = (
-                f"Corridor segment {blocking_segments[0]} is CLOSED due to active hazard. "
-                "NH-44 is a single physical mountain road with no bypass; hold at nearest staging yard."
-            )
+            if len(blocking_segments) == 1:
+                recommendation_reason = (
+                    f"Corridor segment {blocking_segments[0]} is CLOSED due to active hazard. "
+                    "NH-44 is a single physical mountain road with no bypass; hold at nearest staging yard."
+                )
+            else:
+                recommendation_reason = (
+                    f"Corridor is CLOSED: blocked by {len(blocking_segments)} closed segments ({', '.join(blocking_segments[:3])}) due to active hazard. "
+                    "NH-44 is a single physical mountain road with no bypass; hold at nearest staging yard."
+                )
         elif unknown_count > 0 or is_live_stale:
             recommendation = "NO_DATA"
-            recommendation_reason = (
-                f"Route includes {unknown_count} unmonitored or stale segments. "
-                "Conditions cannot be certified safe; proceed only under official traffic authority instructions."
-            )
+            if is_live_stale:
+                recommendation_reason = (
+                    f"Route includes {unknown_count} unmonitored or stale segments. "
+                    "Live telemetry for corridor segments is stale (>24h). "
+                    "Conditions cannot be certified safe; proceed only under official traffic authority instructions."
+                )
+            else:
+                recommendation_reason = (
+                    f"Route includes {unknown_count} unmonitored or stale segments. "
+                    "Conditions cannot be certified safe; proceed only under official traffic authority instructions."
+                )
         elif high_count > 0 or (max_score is not None and max_score >= 0.35):
             recommendation = "DELAY"
             recommendation_reason = (
@@ -664,6 +684,9 @@ class JourneyService:
             has_alternative=False,  # NH-44 is physically a single road
             baseline_route=baseline_route,
             risk_aware_route=risk_aware_route,
+            requested_date=requested_date,
+            date_substituted=date_substituted,
+            actual_date=actual_date,
         )
 
 
