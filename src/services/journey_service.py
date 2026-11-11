@@ -2,7 +2,7 @@
 
 Calculates route segments between corridor landmarks, fetches ST-GNN segment risk scores,
 evaluates vehicle-specific travel times and vulnerability factors, and enforces
-honest scientific semantics.
+honest scientific semantics and dynamic routing across historical and live modes.
 """
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ import csv
 import json
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import networkx as nx
 from fastapi import HTTPException, status
 
 from src.api.config import settings
@@ -22,11 +21,13 @@ from src.api.schemas.journey import (
     JourneyPlace,
     JourneyPlanRequest,
     JourneyPlanResponse,
+    RouteAlternative,
     SegmentItineraryItem,
     VehicleAdvisory,
 )
 from src.services.corridor_service import corridor_service
 from src.services.risk_service import risk_service
+from src.services.routing_engine import MultiObjectiveRouter
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,47 @@ class JourneyService:
         self.sorted_segments_path = sorted_segments_path or settings.sorted_segments_path
         self._places: List[JourneyPlace] = []
         self._sorted_segment_ids: List[str] = []
+        self._places_by_id: Dict[str, JourneyPlace] = {}
+        self._places_by_name: Dict[str, JourneyPlace] = {}
+        self._place_to_sorted_idx: Dict[str, int] = {}
+        self._features_by_id: Dict[str, Any] = {}
+        self._segment_props: Dict[str, Any] = {}
         self._load_places()
         self._load_sorted_segments()
+        self._init_static_lookups()
+
+    def _init_static_lookups(self) -> None:
+        """Precomputes immutable static maps for landmarks, segment properties, and indices."""
+        for p in self._places:
+            self._places_by_id[p.id.lower()] = p
+            self._places_by_name[p.name.lower()] = p
+
+        geojson = corridor_service.get_corridor_geojson()
+        self._features_by_id = {f.id: f for f in geojson.features}
+        self._segment_props = {f.id: f.properties for f in geojson.features if f.properties}
+
+        if not self._sorted_segment_ids:
+            self._sorted_segment_ids = [f.id for f in geojson.features]
+
+        # Precompute nearest sorted segment index for each known landmark
+        for p in self._places:
+            self._place_to_sorted_idx[p.id] = self._find_nearest_sorted_segment_index(
+                p.lat, p.lon, self._features_by_id
+            )
+
+    def reset_static_cache(self) -> None:
+        """Resets and re-indexes static corridor geometry and landmarks (for tests)."""
+        self._places.clear()
+        self._sorted_segment_ids.clear()
+        self._places_by_id.clear()
+        self._places_by_name.clear()
+        self._place_to_sorted_idx.clear()
+        self._features_by_id.clear()
+        self._segment_props.clear()
+        corridor_service._geojson_cache = None
+        self._load_places()
+        self._load_sorted_segments()
+        self._init_static_lookups()
 
     def _load_sorted_segments(self) -> None:
         """Loads monotonically chainage-ordered corridor segment IDs."""
@@ -210,20 +250,24 @@ class JourneyService:
                 ),
             )
 
-    def plan_journey(self, req: JourneyPlanRequest) -> JourneyPlanResponse:
-        """Plans a journey along the corridor with risk scoring and itinerary generation."""
+    def plan_journey(self, req: JourneyPlanRequest, now: Optional[datetime] = None) -> JourneyPlanResponse:
+        """Plans a corridor journey with segment hazard profiling, vehicle advisories, and MultiObjectiveRouter."""
         # 1. Resolve Origin and Destination
         origin_clean = req.origin.strip().lower()
         dest_clean = req.destination.strip().lower()
 
-        origin_p = next(
-            (p for p in self._places if p.id == origin_clean or p.name.lower() == origin_clean or origin_clean in p.name.lower()),
-            None,
-        )
-        dest_p = next(
-            (p for p in self._places if p.id == dest_clean or p.name.lower() == dest_clean or dest_clean in p.name.lower()),
-            None,
-        )
+        origin_p = self._places_by_id.get(origin_clean) or self._places_by_name.get(origin_clean)
+        if not origin_p:
+            origin_p = next(
+                (p for p in self._places if p.id == origin_clean or p.name.lower() == origin_clean or origin_clean in p.name.lower()),
+                None,
+            )
+        dest_p = self._places_by_id.get(dest_clean) or self._places_by_name.get(dest_clean)
+        if not dest_p:
+            dest_p = next(
+                (p for p in self._places if p.id == dest_clean or p.name.lower() == dest_clean or dest_clean in p.name.lower()),
+                None,
+            )
 
         if not origin_p:
             origin_p = self._places[0] if self._places else JourneyPlace(
@@ -240,15 +284,28 @@ class JourneyService:
                 detail="Origin and Destination must be different corridor locations.",
             )
 
-        # 2. Fetch corridor highway geometry
-        geojson = corridor_service.get_corridor_geojson()
-        features_by_id = {f.id: f for f in geojson.features}
+        # 2. Fetch corridor highway geometry and segment indices
+        orig_idx = self._place_to_sorted_idx.get(origin_p.id)
+        if orig_idx is None:
+            orig_idx = self._find_nearest_sorted_segment_index(origin_p.lat, origin_p.lon, self._features_by_id)
 
-        if not self._sorted_segment_ids:
-            self._sorted_segment_ids = [f.id for f in geojson.features]
+        dest_idx = self._place_to_sorted_idx.get(dest_p.id)
+        if dest_idx is None:
+            dest_idx = self._find_nearest_sorted_segment_index(dest_p.lat, dest_p.lon, self._features_by_id)
 
-        orig_idx = self._find_nearest_sorted_segment_index(origin_p.lat, origin_p.lon, features_by_id)
-        dest_idx = self._find_nearest_sorted_segment_index(dest_p.lat, dest_p.lon, features_by_id)
+        if (
+            orig_idx is None
+            or dest_idx is None
+            or orig_idx >= len(self._sorted_segment_ids)
+            or dest_idx >= len(self._sorted_segment_ids)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    f"Data integrity error: Corridor segment index out of range "
+                    f"(origin={orig_idx}, destination={dest_idx}, total_segments={len(self._sorted_segment_ids)})."
+                ),
+            )
 
         step = 1 if dest_idx >= orig_idx else -1
         selected_segment_ids = self._sorted_segment_ids[orig_idx : dest_idx + step : step]
@@ -256,11 +313,76 @@ class JourneyService:
         if not selected_segment_ids:
             selected_segment_ids = [self._sorted_segment_ids[orig_idx]]
 
-        # 3. Retrieve risk predictions for requested date (no silent fallback date)
+        # 3. Resolve Mode (historical vs live)
+        mode = (req.mode or "historical").lower().strip()
+        if mode not in ("historical", "live"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid planning mode '{req.mode}'. Supported modes: 'historical', 'live'.",
+            )
+
         risk_lookup: Dict[str, Any] = {}
-        risk_resp = risk_service.get_risk_by_date(req.date)
-        for seg in risk_resp.segments:
-            risk_lookup[seg.segment_id] = seg
+        blocking_segments: List[str] = []
+        is_live_stale = False
+        journey_date_str = req.date
+        date_substituted = False
+        requested_date = None
+        actual_date = None
+
+        if mode == "live":
+            from src.services.live_risk_service import MAX_DATA_AGE_HOURS, live_risk_service
+
+            # In live mode, evaluate against live operational telemetry.
+            # If the request provides a date, attempt evaluation for that date.
+            # If that date yields no live data (e.g. leftover historical date like '2023-07-09'),
+            # safely ignore the historical date and fallback to latest live risk (as_of=None)
+            # so live plans never silently return NO_DATA due to leftover client date state.
+            live_risk = live_risk_service.get_latest_live_risk(as_of=req.date, eval_time=now)
+            if req.date and (not live_risk.get("segments")):
+                logger.warning(
+                    "Requested date '%s' yielded no segments in live mode; "
+                    "falling back to latest live risk (as_of=None).",
+                    req.date,
+                )
+                live_risk = live_risk_service.get_latest_live_risk(as_of=None, eval_time=now)
+                date_substituted = True
+                requested_date = req.date
+
+            journey_date_str = live_risk.get("as_of") or req.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if date_substituted:
+                actual_date = journey_date_str
+
+            for seg in live_risk.get("segments", []):
+                risk_lookup[seg["segment_id"]] = seg
+
+            effective_now = now or datetime.now(timezone.utc)
+            comp_at_str = live_risk.get("computed_at")
+            is_older_than_24h = False
+            if not comp_at_str:
+                is_older_than_24h = True
+            else:
+                try:
+                    comp_dt = datetime.fromisoformat(comp_at_str.replace("Z", "+00:00"))
+                    if (effective_now - comp_dt).total_seconds() > MAX_DATA_AGE_HOURS * 3600:
+                        is_older_than_24h = True
+                except Exception:
+                    is_older_than_24h = True
+
+            is_live_stale = (
+                is_older_than_24h
+                or any(seg.get("is_stale", False) for seg in live_risk.get("segments", []))
+                or (live_risk.get("as_of") is None)
+            )
+        else:
+            if not req.date:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="date parameter is required in historical planning mode.",
+                )
+            risk_resp = risk_service.get_risk_by_date(req.date)
+            journey_date_str = req.date
+            for seg in risk_resp.segments:
+                risk_lookup[seg.segment_id] = seg
 
         # 4. Build itinerary items
         itinerary: List[SegmentItineraryItem] = []
@@ -274,22 +396,18 @@ class JourneyService:
         bottlenecks: List[str] = []
 
         for seq, sid in enumerate(selected_segment_ids, start=1):
-            feat = features_by_id.get(sid)
-            if not feat or not feat.properties:
-                logger.error(f"Data integrity error: Corridor segment '{sid}' is missing feature properties.")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Data integrity error: Corridor segment '{sid}' is missing required physical properties.",
-                )
-
-            props = feat.properties
+            props = self._segment_props.get(sid)
+            if not props:
+                feat = self._features_by_id.get(sid)
+                props = feat.properties if feat else None
             if (
-                props.length_m is None
+                props is None
+                or props.length_m is None
                 or props.slope is None
                 or props.elevation_m is None
                 or not props.highway
             ):
-                logger.error(f"Data integrity error: Segment '{sid}' is missing required static attributes: {props}")
+                logger.error(f"Data integrity error: Corridor segment '{sid}' is missing required static attributes: {props}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=f"Data integrity error: Corridor segment '{sid}' is missing required physical properties.",
@@ -304,18 +422,28 @@ class JourneyService:
             max_slope = max(max_slope, slope * 100)
 
             r_item = risk_lookup.get(sid)
-            if r_item is None or r_item.risk_score is None:
+            op_status = None
+
+            if r_item is None:
                 score = None
                 tier = "UNKNOWN"
                 unknown_count += 1
                 hazard_notes = "Segment risk data unavailable in precomputed model cache"
             else:
-                score = r_item.risk_score
-                tier = r_item.risk_tier
-                scores.append(score)
+                score = r_item.get("risk_score") if isinstance(r_item, dict) else r_item.risk_score
+                tier = r_item.get("risk_tier") if isinstance(r_item, dict) else r_item.risk_tier
+                op_status = r_item.get("operational_status") if isinstance(r_item, dict) else getattr(r_item, "operational_status", None)
+
+                if op_status == "CLOSED":
+                    blocking_segments.append(sid)
+
+                if score is not None:
+                    scores.append(score)
 
                 hazard_notes = None
-                if tier == "High":
+                if op_status == "CLOSED":
+                    hazard_notes = "Segment is CLOSED due to active hazard disruption"
+                elif tier == "High":
                     high_count += 1
                     hazard_notes = "High landslide susceptibility on current weather backtest"
                     if len(bottlenecks) < 4:
@@ -341,6 +469,7 @@ class JourneyService:
                     risk_tier=tier,
                     highway=highway,
                     hazard_notes=hazard_notes,
+                    operational_status=op_status,
                 )
             )
 
@@ -392,21 +521,138 @@ class JourneyService:
             overall_risk = "High"
         elif med_count > 0 or (max_score is not None and max_score >= 0.10):
             overall_risk = "Medium"
-        elif unknown_count > 0:
+        elif unknown_count > 0 or is_live_stale:
             overall_risk = "Unknown"
         else:
             overall_risk = "Low"
 
-        retrospective_notice = (
-            f"Advisory route analysis for {req.date} using ST-GNN spatial-temporal graph neural network "
-            "conditioned on ERA5-Land reanalysis. This represents retrospective situational intelligence; "
-            "actual mountain clearance depends on real-time highway police operational status."
+        # 6. MultiObjectiveRouter Integration (Task 4)
+        router = MultiObjectiveRouter()
+        for i, sid in enumerate(selected_segment_ids):
+            u_node = f"node_{i}"
+            v_node = f"node_{i + 1}"
+            props = self._segment_props.get(sid)
+            seg_len = props.length_m if props else 200.0
+            seg_travel_time = (seg_len / 1000.0) / max(speed, 10.0) * 3600.0
+            r_entry = risk_lookup.get(sid)
+            s_val = r_entry.get("risk_score") if isinstance(r_entry, dict) else getattr(r_entry, "risk_score", None) if r_entry else None
+            is_seg_blocked = sid in blocking_segments
+
+            router.add_edge(
+                u=u_node,
+                v=v_node,
+                edge_id=sid,
+                length_m=seg_len,
+                travel_time_sec=seg_travel_time,
+                risk_score=s_val if s_val is not None else 0.5,
+                is_blocked=is_seg_blocked,
+            )
+
+        start_node = "node_0"
+        end_node = f"node_{len(selected_segment_ids)}"
+        baseline_res = router.find_route(start_node, end_node, lambda_risk=0.0, risk_block_threshold=1.0)
+        risk_aware_res = router.find_route(start_node, end_node, lambda_risk=5.0, risk_block_threshold=0.85)
+
+        # 7. Operational Recommendation Decision Matrix
+        if blocking_segments:
+            recommendation = "HOLD"
+            if len(blocking_segments) == 1:
+                recommendation_reason = (
+                    f"Corridor segment {blocking_segments[0]} is CLOSED due to active hazard. "
+                    "NH-44 is a single physical mountain road with no bypass; hold at nearest staging yard."
+                )
+            else:
+                recommendation_reason = (
+                    f"Corridor is CLOSED: blocked by {len(blocking_segments)} closed segments ({', '.join(blocking_segments[:3])}) due to active hazard. "
+                    "NH-44 is a single physical mountain road with no bypass; hold at nearest staging yard."
+                )
+        elif unknown_count > 0 or is_live_stale:
+            recommendation = "NO_DATA"
+            if is_live_stale:
+                recommendation_reason = (
+                    f"Route includes {unknown_count} unmonitored or stale segments. "
+                    "Live telemetry for corridor segments is stale (>24h). "
+                    "Conditions cannot be certified safe; proceed only under official traffic authority instructions."
+                )
+            else:
+                recommendation_reason = (
+                    f"Route includes {unknown_count} unmonitored or stale segments. "
+                    "Conditions cannot be certified safe; proceed only under official traffic authority instructions."
+                )
+        elif high_count > 0 or (max_score is not None and max_score >= 0.35):
+            recommendation = "DELAY"
+            recommendation_reason = (
+                f"High disruption hazard tier (>=0.35) detected on {high_count} segment(s); "
+                "delay transit or hold departure until mountain weather conditions improve."
+            )
+        elif med_count > 0 or (max_score is not None and max_score >= 0.10):
+            recommendation = "PROCEED_WITH_CAUTION"
+            recommendation_reason = (
+                f"Elevated disruption risk tier (0.10-0.35) on {med_count} segment(s); "
+                "proceed with heightened caution, avoid night travel, and observe local marshaling."
+            )
+        else:
+            recommendation = "PROCEED"
+            recommendation_reason = "Corridor baseline clear (<0.10); proceed under standard mountain driving precautions."
+
+        # Side-by-side alternative RouteAlternative objects
+        base_travel_minutes = int(math.ceil(base_hours * 60))
+        baseline_route = RouteAlternative(
+            name="baseline_shortest",
+            total_distance_km=total_distance_km,
+            estimated_travel_minutes=base_travel_minutes,
+            overall_risk=overall_risk,
+            max_risk_score=max_score,
+            average_risk_score=avg_score,
+            high_risk_segments_count=high_count,
+            medium_risk_segments_count=med_count,
+            low_risk_segments_count=low_count,
+            unknown_segments_count=unknown_count,
+            blocking_segments=blocking_segments,
+            is_passable=len(blocking_segments) == 0,
+            trade_off_explanation=(
+                baseline_res.trade_off_explanation
+                if baseline_res
+                else f"Baseline path impassable: blocked by {len(blocking_segments)} closed segment(s)."
+            ),
         )
+
+        risk_aware_route = RouteAlternative(
+            name="risk_aware",
+            total_distance_km=total_distance_km,
+            estimated_travel_minutes=total_minutes,
+            overall_risk=overall_risk,
+            max_risk_score=max_score,
+            average_risk_score=avg_score,
+            high_risk_segments_count=high_count,
+            medium_risk_segments_count=med_count,
+            low_risk_segments_count=low_count,
+            unknown_segments_count=unknown_count,
+            blocking_segments=blocking_segments,
+            is_passable=len(blocking_segments) == 0,
+            trade_off_explanation=(
+                risk_aware_res.trade_off_explanation
+                if risk_aware_res
+                else f"Risk-aware route impassable: blocked by {len(blocking_segments)} closed segment(s); hold or delay."
+            ),
+        )
+
+        if mode == "live":
+            notice = (
+                "Live advisory route analysis using real-time ST-GNN inference and Open-Meteo telemetry. "
+                "Experimental — not validated. Actual road clearance depends on Highway Traffic Police operational status."
+            )
+        else:
+            notice = (
+                f"Advisory route analysis for {req.date} using ST-GNN spatial-temporal graph neural network "
+                "conditioned on ERA5-Land reanalysis. This represents retrospective situational intelligence; "
+                "actual mountain clearance depends on real-time highway police operational status."
+            )
 
         return JourneyPlanResponse(
             origin=origin_p.name,
             destination=dest_p.name,
-            journey_date=req.date,
+            journey_date=journey_date_str,
             departure_time=dep_str,
             estimated_arrival_time=arr_str,
             arrival_deadline=req.arrival_deadline,
@@ -429,8 +675,18 @@ class JourneyService:
             is_incomplete_data=unknown_count > 0,
             bottlenecks=bottlenecks,
             historical_disruptions_on_route=high_count + med_count,
-            retrospective_notice=retrospective_notice,
+            retrospective_notice=notice,
             itinerary=itinerary,
+            mode=mode,
+            recommendation=recommendation,
+            recommendation_reason=recommendation_reason,
+            blocking_segments=blocking_segments,
+            has_alternative=False,  # NH-44 is physically a single road
+            baseline_route=baseline_route,
+            risk_aware_route=risk_aware_route,
+            requested_date=requested_date,
+            date_substituted=date_substituted,
+            actual_date=actual_date,
         )
 
 

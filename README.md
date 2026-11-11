@@ -2,638 +2,732 @@
 
 **Predictive road-disruption risk intelligence for NH-44 (Ramban–Banihal), Jammu & Kashmir.**
 
-RouteWise estimates landslide, snow and shooting-stone disruption risk for each road segment of a mountain highway corridor. It combines a graph model of the road network, ERA5-Land weather, SRTM terrain and historical disruption reports in a spatio-temporal graph neural network (ST-GNN), and shows the result in a web dashboard backed by a FastAPI service. The dashboard also supports role-based access, field reporting with a browser-side pending queue, a patrol review workflow and English/Hindi text. It is a minor project (Group 21, B.Tech Computer Science and Engineering, MIET Jammu).
+RouteWise estimates landslide, snow and shooting-stone disruption risk for each road segment of a mountain highway corridor. It combines a graph model of the road network, ERA5-Land weather, SRTM terrain and historical disruption reports in a spatio-temporal graph neural network (ST-GNN), and serves predictions and operational overlays via a FastAPI backend to an accessible React dashboard. The system features real-time intelligence with three operational modes (`off`, `replay`, `live`), resilient Server-Sent Events (SSE) with automatic polling fallback, conservative incident report deduplication with additive linking, a patrol verification lifecycle, dynamic single-corridor journey planning with hold advisories, and English/Hindi localization. RouteWise is a minor project (Group 21, B.Tech Computer Science and Engineering, MIET Jammu, 2026).
 
-> **Advisory only.** RouteWise outputs are retrospective relative-risk scores from a model trained on a small set of reported events. They are not calibrated probabilities, not live forecasts, and not a guarantee that a road is open or safe. Always follow official traffic and police advisories.
+> [!IMPORTANT]
+> **Advisory only.** RouteWise outputs are relative-risk indices from a model trained on historical reanalysis and a small set of reported events. They are not calibrated physical failure probabilities, not live meteorological forecasts, and not a guarantee that a road is open or safe. Live atmospheric predictions represent an unvalidated distribution shift from training data and are explicitly badged *"Live data - Experimental - not validated"*. Always follow official Traffic Police and Traffic Control Unit (TCU) advisories.
 
-> **Verification status.** All backend API routes, role enforcement, journey planner calculations, persistent sync queues, and repository structures in this document have been audited against the source code and verified with passing automated test suites (61 backend pytest tests and 13 frontend unit tests).
+> [!NOTE]
+> **Verification status.** All backend API routes, role enforcement dependencies, journey planner calculations, persistent sync queues, real-time streaming connections, and deduplication logic in this document have been audited against the source code and verified with passing automated test suites:
+> - **Backend Test Suite:** **206 passed** across all three operational modes (`ROUTEWISE_LIVE_MODE="off"`, `"replay"`, and `"live"`).
+> - **Incident Deduplication Suite:** **34 passed** (`tests/test_incident_deduplication.py`).
+> - **Historical Golden Tests:** **6 passed** (`tests/test_journey_golden.py`).
+> - **Frontend Unit Suite:** **49 passed** across 14 suites (`npm --prefix frontend test`).
+> - **Frontend Production Build:** **Succeeded** with Vite v6.4.4 (`npm --prefix frontend run build`).
+> - **Protected Assets:** SHA-256 hashes of `stgnn_best.pt`, `data/routewise_local.db`, and `data/runtime/routewise_live.db` are strictly verified.
+
+---
 
 ## Contents
 
-1. [Project overview](#project-overview)
-2. [Key features](#key-features)
-3. [Current implementation status](#current-implementation-status)
-4. [Architecture and technology stack](#architecture-and-technology-stack)
-5. [Dashboard features](#dashboard-features)
-6. [Roles and access control](#roles-and-access-control)
-7. [Field reporting and patrol workflow](#field-reporting-and-patrol-workflow)
-8. [Language support](#language-support)
-9. [API documentation](#api-documentation)
-10. [Data sources and preparation](#data-sources-and-preparation)
-11. [ST-GNN methodology and results](#st-gnn-methodology-and-results)
-12. [Installation and setup](#installation-and-setup)
-13. [Running the backend and frontend](#running-the-backend-and-frontend)
-14. [Testing](#testing)
-15. [Project structure](#project-structure)
-16. [Limitations and known issues](#limitations-and-known-issues)
-17. [Roadmap and next steps](#roadmap-and-next-steps)
-18. [Acknowledgements and data-source attribution](#acknowledgements-and-data-source-attribution)
+1. [Project Overview and Problem Statement](#project-overview-and-problem-statement)
+2. [Key Features](#key-features)
+3. [Current Implementation Status](#current-implementation-status)
+4. [System Architecture and Technology Stack](#system-architecture-and-technology-stack)
+5. [Real-Time Intelligence & Operational Modes](#real-time-intelligence--operational-modes)
+6. [Live Weather Ingestion & Data-Processing Pipeline](#live-weather-ingestion--data-processing-pipeline)
+7. [Operational Hazard Events & Status Management](#operational-hazard-events--status-management)
+8. [Incident Reporting & Conservative Deduplication](#incident-reporting--conservative-deduplication)
+9. [Patrol Operations & Verification Lifecycle](#patrol-operations--verification-lifecycle)
+10. [Live Dashboard, SSE Streaming & Resilience](#live-dashboard-sse-streaming--resilience)
+11. [Journey Planning & Corridor Advisories](#journey-planning--corridor-advisories)
+12. [Dashboard Features & Accessibility](#dashboard-features--accessibility)
+13. [Roles and Access Control](#roles-and-access-control)
+14. [Language Support](#language-support)
+15. [API Documentation](#api-documentation)
+16. [Data Sources and Preparation](#data-sources-and-preparation)
+17. [ST-GNN Methodology and Results](#st-gnn-methodology-and-results)
+18. [Installation and Setup](#installation-and-setup)
+19. [Running the Backend and Frontend](#running-the-backend-and-frontend)
+20. [Testing Instructions & Verified Evidence](#testing-instructions--verified-evidence)
+21. [Repository Structure](#repository-structure)
+22. [Limitations, Known Issues, and Safety Requirements](#limitations-known-issues-and-safety-requirements)
+23. [Roadmap and Next Steps](#roadmap-and-next-steps)
+24. [Acknowledgements and Data Attribution](#acknowledgements-and-data-attribution)
 
-## Project overview
+---
 
-**Problem.** NH-44, the Jammu–Srinagar highway, is regularly closed by landslides, snow and shooting stones, often at short notice and often where mobile coverage is poor. Travellers and logistics operators choose routes on distance alone and have little structured information about disruption risk. Official updates are mostly reactive: they are issued through Traffic Police channels and Traffic Control Units after a closure happens.
+## Project Overview and Problem Statement
 
-**Approach.** RouteWise models the highway as a graph of road segments, learns from the preceding seven days of weather and from static terrain features how disruption risk varies across segments, and presents the result with explicit labels for missing or stale data. Field reports from users are reviewed by authorised patrol personnel. The longer-term design adds a mobile field app with full offline capture and synchronisation, and risk-aware routing (see the [roadmap](#roadmap-and-next-steps)).
+### The Problem
+NH-44 (the Jammu–Srinagar National Highway) is the sole physical arterial surface link connecting the Kashmir Valley to the rest of India. The 36 km mountain section between **Ramban and Banihal** passes through the steep, geologically fragile Chenab gorge. This corridor is regularly closed by landslides, shooting stones, mudslides, and heavy winter snowfall. Travellers, commercial truckers, and emergency convoys have historically chosen departure times on distance alone, lacking structured forward-looking risk information. Existing public updates are mostly reactive, issued by Traffic Control Units (TCUs) and J&K Traffic Police only after a physical blockage has already stranded thousands of vehicles in hazardous terrain with minimal cellular coverage.
 
-**Pilot corridor.** Ramban to Banihal (latitude 33.211 to 33.475, longitude 75.161 to 75.262), a landslide-prone stretch of NH-44, represented as **151 road segments**.
+### The RouteWise Approach
+RouteWise models the highway as an interconnected topological graph of **151 road segments**. It learns spatial and temporal disruption risk by combining 7-day rolling atmospheric sequences (Copernicus ERA5-Land reanalysis) with static terrain features (SRTM elevation and slope) in a Spatio-Temporal Graph Neural Network (ST-GNN). It then bridges predictive modeling with ground-level operational reality:
+1. **Separation of Risk and Physical Overlay:** Retrospective ST-GNN risk models run alongside an operational hazard overlay (verified field reports, TCU notifications, operator simulations) without modifying underlying neural network weights.
+2. **Real-Time Demonstration & Replay:** Ingests live numerical weather from Open-Meteo across 22 corridor clusters or replays historical storm sequences into an isolated runtime database (`data/runtime/routewise_live.db`).
+3. **Single-Corridor Honesty:** The Chenab gorge has no parallel bypass routes. RouteWise strictly enforces `has_alternative=False`, issuing **`HOLD`** and **`DELAY`** advisories at prior staging depots rather than fabricating phantom detours.
+4. **Field Incident Deduplication:** Field submissions are snapped to segments, normalized to preset hazard categories, and conservatively deduplicated within a 24-hour dual-timestamp window.
+5. **Fail-Safe Integrity:** Any segment lacking complete 7-day weather or whose data exceeds 24 hours of staleness evaluates safely to `UNKNOWN` / `STALE_DATA` and is never defaulted to `Low` risk.
 
-> **Screenshot placeholder:** add dashboard screenshots (light and dark theme, corridor strip, patrol dashboard) here once they are saved in the repository. Use demo data only, with no personal locations.
+**Pilot corridor:** Ramban to Banihal (latitude 33.211°N to 33.475°N, longitude 75.161°E to 75.262°E), spanning 151 segments over ~36.2 km.
 
-## Key features
+---
 
-**Implemented**
+## Key Features
 
-- GIS corridor graph of NH-44 (Ramban–Banihal) with SRTM elevation and slope.
-- Daily ERA5-Land weather per road segment (2021–2025) with 3-day and 7-day rainfall.
-- Disruption-event log sourced from news reports, snapped to road segments.
-- Chronological train, validation and test datasets.
-- ST-GNN (graph convolution plus GRU) with logistic-regression baselines, trained in Google Colab.
-- Model card with held-out results, thresholds, calibration and latency (`model_card.md`).
-- Offline SQLite schema for field reports, photos, a risk cache and a sync queue.
-- FastAPI backend serving model output and metadata to the dashboard (run locally; see the notes in [API documentation](#api-documentation)).
-- React dashboard with an interactive corridor map, risk tiers, segment inspector, historical date selection and Light/Dark mode.
+### Implemented and Verified with Automated Test Suites
 
-**Implemented and verified with automated test suites**
+- **GIS Corridor Graph & Terrain Engine:** 151 continuous road-segment edges with SRTM-derived elevation and slope gradient features (`nh44_corridor_graph.graphml`).
+- **Spatio-Temporal Graph Neural Network (ST-GNN):** PyTorch implementation (2 GCNConv layers + GRU recurrent cell + linear projection), trained on 2021–2023 chronological splits, evaluated on held-out 2024–2025 test years (`stgnn_best.pt`).
+- **Three Operational Real-Time Modes (`ROUTEWISE_LIVE_MODE=off|replay|live`):**
+  - `off`: Default, pure historical reanalysis mode with 100% existing API and database parity.
+  - `replay`: Replays historical storm sequences day-by-day from CSV into an isolated runtime database.
+  - `live`: Periodically ingests live numerical weather from Open-Meteo across 22 spatial clusters, converts features to ERA5-equivalent units, rolls 7-day feature windows, and evaluates ST-GNN inference.
+- **Strict Database & Runtime Isolation:** Protected historical database (`data/routewise_local.db`) is guarded against modification by fail-closed checks (`_is_protected_db()`). All runtime operations reside in `data/runtime/routewise_live.db`.
+- **Deterministic Operational Status Overlay:** Synthesizes model risk with verified ground reports and TCU alerts into `OPEN`, `CAUTION`, `RESTRICTED`, `CLOSED`, or `UNKNOWN`.
+- **Incident Intelligence & Conservative Deduplication (Task 4):**
+  - Accepts 7 public report categories (`landslide`, `shooting_stones`, `flooding`, `road_damage`, `snow_or_ice`, `single_lane_or_obstruction`, `other`).
+  - Normalizes non-preset categories to `road_damage` in accordance with `VALID_PRESETS`.
+  - Additive schema linking (`duplicate_of`, `hazard_event_id`, `report_count`, `last_reported_at`).
+  - Evaluates dual-timestamp 24-hour windows (`created_at` and `last_reported_at`).
+  - Verified-only `last_reported_at` updates ensure unverified reports cannot extend hazard lifecycles.
+  - Primary rejection closes active events; duplicate rejection unlinks duplicate reports.
+- **Dynamic Single-Corridor Routing Engine:**
+  - Evaluates physical transit duration alongside risk exposure.
+  - Honest operational recommendations: **`HOLD`**, **`NO_DATA`**, **`DELAY`**, **`PROCEED_WITH_CAUTION`**, **`PROCEED`**.
+  - Non-zero reason wording (never cites zero counts, e.g. "blocked by 1 closed segment (seg_050)", never "0 closed segments").
+  - Live date substitution handling (`date_substituted=True`, `requested_date`, `actual_date`).
+  - Enforces `has_alternative=False` on the single mountain highway corridor.
+- **Live Connection Resilience & Polling Fallback:**
+  - Server-Sent Events (`/api/v1/live/stream`) with 20-second heartbeats.
+  - Client-side reconnection with full-jitter exponential backoff (capping at 30 seconds).
+  - REST polling fallback (10s–30s interval) when streaming is interrupted.
+- **Role-Based Access Control (RBAC):** Backend security dependencies strictly enforce role matrix (`guest`, `user`, `patrol`, `admin`) with PBKDF2-HMAC-SHA256 password hashing and signed JWT tokens.
+- **Offline-Tolerant Browser Queue:** IndexedDB-backed pending report queue in the frontend with client-generated UUID idempotency and exponential backoff retry.
+- **Accessible React Dashboard:** Interactive Leaflet corridor map, horizontal Ramban–Banihal strip, non-color geometric cues (`●`, `■`, `▲`, `?`, `~`), WCAG AA compliant theme tokens, and React ErrorBoundary.
+- **English / Hindi Localization:** Complete bilingual interface (`en.json`, `hi.json`) with documented translation notes (`docs/TRANSLATION_REVIEW.md`).
 
-- Sign-in, registration and guest entry, with roles (`guest`, `user`, `patrol`, `admin`) enforced in the backend.
-- Horizontal Ramban–Banihal corridor strip and a segment risk-detail drawer.
-- Field-report form with browser-side persistent IndexedDB queue, and a patrol review workflow.
-- English and Hindi interface text (`en.json`, `hi.json`; review notes in `docs/TRANSLATION_REVIEW.md`).
-- Redesigned light theme with WCAG AA compliant contrast tokens.
-- Corridor journey planner with chainage-ordered physical routing and hazard advisories.
+### Planned Future Extensions (Not Yet Implemented)
+- **Native Mobile Field App:** A native Flutter mobile client with SQLite offline storage (currently supported via offline browser queue).
+- **Automated Computer-Vision Assessment:** Automated road-condition assessment from photos using Vision Transformers (ViT). Currently, attached photos serve exclusively as human evidence for patrol officers.
+- **External Multi-Corridor Detour Networks:** Alternate regional highways (e.g. Mughal Road). Currently, routing is strictly restricted to the physical NH-44 alignment.
+- **External Push / SMS Alerts:** RouteWise alerts are delivered exclusively within the web application interface; no cellular broadcast or SMS gateways are integrated.
 
-**Not yet implemented**
+---
 
-- Live weather ingestion (no Copernicus CDS connection at run time).
-- Mobile app with offline capture (Flutter) and a service-worker offline app shell.
-- Server-side report synchronisation with multi-master conflict resolution beyond client-UUID idempotent deduplication (full sync engine planned for mobile field app).
-- Automated road-condition assessment from photos (ViT). Photos, where supported, are for human review only.
-- Dynamic external multi-corridor bypass routing (the current router models the single physical NH-44 mountain highway corridor, evaluating risk exposure and delay advisories without fabricating phantom roads).
-- SMS or push alert delivery. Alerts are shown in the app only.
+## Current Implementation Status
 
-## Current implementation status
+| Component | Status | Verification Evidence & Test Coverage |
+| :--- | :---: | :--- |
+| **GIS Corridor Graph & Terrain** | Complete | `week1_graph_and_terrain.py`, 151 segments, SRTM elevation/slope |
+| **Weather & Disruption Datasets** | Complete | `week2*` scripts, 274k weather rows, 99 snapped historical events |
+| **ST-GNN Model Architecture & Weights** | Complete | Checkpoint `stgnn_best.pt` (SHA-256: `68B04504EAE6...5054006E`) |
+| **Model Evaluation, Card & Calibration** | Complete | Held-out AP: 0.259 (best seed), 0.215 ± 0.041 (5-seed mean) |
+| **FastAPI Backend Services** | Complete | **206 passed** in `off`, **206 passed** in `replay`, **206 passed** in `live` |
+| **Incident Deduplication & Linking** | Complete | **34 passed** in `tests/test_incident_deduplication.py` |
+| **Historical Golden Fixtures** | Complete | **6 passed** in `tests/test_journey_golden.py` |
+| **React Web Dashboard** | Complete | **49 passed** in `npm --prefix frontend test`, Vite build succeeded |
+| **Real-Time Modes (`off/replay/live`)** | Complete | Verified across runtime databases, Open-Meteo clustering, and replay |
+| **Connection Resilience & Fallback** | Complete | Reconnect backoff with full jitter, REST polling fallback verified |
+| **Dynamic Corridor Routing** | Complete | Single-corridor constraint, non-zero wording, date substitution verified |
+| **Patrol Operations & Verification** | Complete | RBAC transitions, corroboration counts, audit trail history verified |
+| **English / Hindi Localization** | Complete | 100% key parity across `en.json` and `hi.json`, unreviewed keys logged |
+| **Native Flutter Field App** | Planned | Offline browser queue implemented; native mobile client planned |
+| **Automated ViT Photo Classification** | Planned | Manual photo evidence review only; automated CV not implemented |
 
-Status labels: **Complete**, **Implemented—Testing Ongoing**, **In Progress**, **Planned**, **Unverified**.
+---
 
-| Component                                   | Status                      | Notes                                                                                                           |
-| ------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| GIS corridor graph and terrain              | Complete                    | `week1_graph_and_terrain.py`                                                                                    |
-| Weather and disruption datasets             | Complete                    | `week2*` scripts. Some event dates still need checking (see [limitations](#limitations-and-known-issues))       |
-| Offline SQLite schema                       | Complete                    | Schema and test script only. No mobile app uses it yet                                                          |
-| Model dataset preparation                   | Complete                    | `week4_build_dataset.py`                                                                                        |
-| ST-GNN architecture, training and tuning    | Complete                    | `week6_stgnn.py`, `week7_train.py` (Colab)                                                                      |
-| Model evaluation, thresholds, calibration   | Complete                    | Documented in the model card                                                                                    |
-| FastAPI backend (risk and metadata)         | Implemented—Testing Ongoing | 61 automated unit and integration tests passing across 12 test modules (`python -m pytest`)                     |
-| React dashboard (risk view)                 | Implemented—Testing Ongoing | Run locally. Shows retrospective risk only                                                                      |
-| Dashboard–API connection                    | Implemented—Testing Ongoing | Observed working in local runs; 13 frontend unit tests passing (`node --test test/unit.test.js`)                |
-| Authentication and role-based access        | Implemented—Testing Ongoing | Roles (`guest`, `user`, `patrol`, `admin`) enforced in backend dependencies and verified by tests               |
-| Field-report form and browser pending queue | Implemented—Testing Ongoing | Persistent IndexedDB queue in `reportQueue.js` with client-UUID idempotency and exponential backoff              |
-| Patrol review workflow                      | Implemented—Testing Ongoing | State machine transitions (`submitted` -> `verified` -> `assigned` -> `resolved`, or `rejected`) verified       |
-| Corridor strip and risk-detail drawer       | Implemented—Testing Ongoing | 151-segment continuous strip in `CorridorStrip.jsx` and genuine physical input features in `RiskDetailDrawer`   |
-| English/Hindi interface                     | Implemented—Testing Ongoing | `en.json` and `hi.json` exist. Hindi review is recorded in `docs/TRANSLATION_REVIEW.md`                         |
-| Light theme redesign                        | Implemented—Testing Ongoing | Semantic design tokens in `frontend/src/theme.css` verified for WCAG AA contrast ratio                          |
-| Server-side sync and conflict resolution    | Planned                     | Client-UUID idempotent deduplication implemented; multi-master offline conflict resolution planned for mobile    |
-| Flutter field app                           | Planned                     | Not implemented                                                                                                 |
-| Risk-aware routing                          | Planned                     | Corridor journey planner evaluates risk along NH-44 with vehicle hold advisories; external bypasses planned     |
-| ViT road-condition assessment               | Planned                     | Not implemented                                                                                                 |
-| Live weather ingestion                      | Planned                     | The dashboard uses historical data only                                                                         |
-| Integration, validation, report and demo    | Planned                     |                                                                                                                 |
-
-**Project timeline.** The original timeline numbering is kept. The 16-week development plan (`development-plan.md`) splits some items; the right-hand column shows the mapping.
-
-| Timeline week | Topic                                       | Status                      | 16-week plan     |
-| ------------- | ------------------------------------------- | --------------------------- | ---------------- |
-| 1             | GIS data and NH-44 graph                    | Complete                    | Week 1           |
-| 2             | Weather and historical disruption data      | Complete                    | Week 2           |
-| 3             | Offline-first SQLite schema                 | Complete                    | Week 3           |
-| Prep          | Dataset for the model (feeds weeks 6 and 7) | Complete                    | Week 4           |
-| 6             | ST-GNN architecture and baselines           | Complete                    | Week 5           |
-| 7             | ST-GNN training and tuning (Google Colab)   | Complete                    | Week 6           |
-| 7 (ext.)      | Model evaluation, calibration, model card   | Complete                    | Week 7           |
-| 5             | Backend: risk API                           | Implemented—Testing Ongoing | Week 8           |
-| 5             | Backend: sync and conflict resolution       | Planned                     | Week 9           |
-| 9             | Dashboard (risk view)                       | Implemented—Testing Ongoing | Week 13 (partly) |
-| 9 (ext.)      | Roles, field reports, patrol workflow       | Implemented—Testing Ongoing | Weeks 9, 13      |
-| 4             | Mobile app with offline capture (Flutter)   | Planned                     | Weeks 10–11      |
-| 8             | Risk-aware routing                          | Planned                     | Week 12          |
-| 10 to 12      | Integration, validation, report and demo    | Planned                     | Weeks 14–16      |
-
-The model comes before the app because routing needs the model's output.
-
-## Architecture and technology stack
+## System Architecture and Technology Stack
 
 ```mermaid
-flowchart LR
-  subgraph DATA["Data and model (Python)"]
-    SRC["OSM, SRTM, ERA5-Land,<br/>news-sourced events"] --> PIPE["Data pipeline<br/>and training tables"]
-    PIPE --> MODEL["ST-GNN<br/>stgnn_best.pt"]
-  end
-  subgraph BACKEND["FastAPI backend"]
-    AUTH["Authentication and<br/>role checks"]
-    API["Risk and metadata<br/>endpoints"]
-    REP["Field-report endpoints"]
-  end
-  subgraph WEB["React dashboard"]
-    MAP["Corridor strip, Leaflet map,<br/>risk drawer"]
-    OPS["Report form and<br/>patrol dashboard"]
-    QUEUE["Browser pending-<br/>report queue"]
-  end
-  MODEL --> API --> MAP
-  AUTH --> API
-  AUTH --> REP
-  OPS --> REP
-  QUEUE --> REP
-  subgraph PLANNED["Planned"]
-    APP["Flutter offline app"]
-    SYNC["Server-side sync and<br/>conflict resolution"]
-    ROUTE["Risk-aware routing"]
-  end
-  APP -.-> SYNC -.-> REP
-  API -.-> ROUTE
+flowchart TD
+    subgraph SOURCES["Atmospheric & Terrain Sources"]
+        ERA5["Copernicus ERA5-Land<br/>(2021–2025 Reanalysis)"]
+        METEO["Open-Meteo Archive / Forecast API<br/>(22 Spatial Grid Clusters)"]
+        SRTM["SRTM Digital Elevation Model<br/>(30m Topography)"]
+        OSM["OpenStreetMap NH-44 Graph<br/>(151 Segments, ~36.2 km)"]
+    end
+
+    subgraph STORAGE["Data Isolation Layer"]
+        PROT_DB[("Protected Historical DB<br/>data/routewise_local.db<br/>(Read-Only Guarded)")]
+        LIVE_DB[("Runtime Operational DB<br/>data/runtime/routewise_live.db<br/>(Live Ingestion & Events)")]
+    end
+
+    subgraph BACKEND["FastAPI Application Services"]
+        AUTH_SVC["Auth & RBAC Service<br/>(JWT, PBKDF2-HMAC-SHA256)"]
+        WEATHER_SVC["Weather Storage & Scheduler<br/>(Rolling 7-Day Window)"]
+        RISK_SVC["ST-GNN Inference Engine<br/>(stgnn_best.pt Checkpoint)"]
+        HAZARD_SVC["Hazard Event Service<br/>(Deduplication & Operational Overlay)"]
+        REPORT_SVC["Report Service<br/>(Client-UUID Idempotency, Linking)"]
+        ROUTER_SVC["MultiObjectiveRouter<br/>(Single-Corridor Honesty, HOLD/DELAY)"]
+        ALERT_SVC["Alert Service<br/>(1-Hour Cooldown, Auto-Clear)"]
+        SSE_DISPATCH["LiveBroadcaster<br/>(SSE Stream: /api/v1/live/stream)"]
+    end
+
+    subgraph FRONTEND["React 18 Dashboard Client"]
+        CONN_MGR["Connection Resilience Manager<br/>(SSE Reconnect Jitter & Polling Fallback)"]
+        CORRIDOR_UI["Corridor Strip & Leaflet Map<br/>(Non-Color Accessible Symbols)"]
+        JOURNEY_UI["Mode-Aware Journey Planner<br/>(Date Substitution & Honest Advisories)"]
+        PATROL_UI["Patrol Operations Dashboard<br/>(Verification, Corroboration Counts)"]
+        REPORT_QUEUE["Persistent IndexedDB Queue<br/>(Offline Submission & Sync)"]
+        ERR_BOUNDARY["React Error Boundary<br/>(Render Exception Capture)"]
+    end
+
+    ERA5 --> PROT_DB
+    SRTM --> PROT_DB
+    OSM --> PROT_DB
+    METEO --> WEATHER_SVC
+    WEATHER_SVC --> LIVE_DB
+    PROT_DB -.->|Fail-Closed Read| RISK_SVC
+    LIVE_DB <--> RISK_SVC
+    LIVE_DB <--> HAZARD_SVC
+    LIVE_DB <--> REPORT_SVC
+    LIVE_DB <--> ALERT_SVC
+    RISK_SVC --> ROUTER_SVC
+    HAZARD_SVC --> ROUTER_SVC
+    HAZARD_SVC --> SSE_DISPATCH
+    RISK_SVC --> SSE_DISPATCH
+    ALERT_SVC --> SSE_DISPATCH
+    ROUTER_SVC --> SSE_DISPATCH
+    SSE_DISPATCH ==>|Server-Sent Events| CONN_MGR
+    CONN_MGR --> CORRIDOR_UI
+    CONN_MGR --> JOURNEY_UI
+    CONN_MGR --> PATROL_UI
+    REPORT_QUEUE --> REPORT_SVC
 ```
 
-Solid arrows are implemented and verified. Dashed boxes and arrows are planned future extensions.
+### Technology Matrix
+- **Data Engineering & GIS:** Python 3.11, OSMnx, NetworkX, pandas, rasterio, cdsapi, netCDF4, geopandas.
+- **Neural Network Modeling:** PyTorch 2.x (2-layer GCNConv + GRU recurrent cell), scikit-learn baselines.
+- **Backend Infrastructure:** FastAPI, Uvicorn ASGI server, Pydantic v2 schemas, SQLite3, Pillow (EXIF metadata stripping).
+- **Frontend Architecture:** React 18, Vite, React-Leaflet v4, Lucide React icons, Vanilla CSS semantic design tokens.
+- **Client Offline Storage:** Browser IndexedDB (Dexie-compatible schema for pending sync queue).
+- **Internationalization:** Custom i18n JSON provider supporting English (`en.json`) and Hindi (`hi.json`).
 
-| Layer         | Technology                                                                                  |
-| ------------- | ------------------------------------------------------------------------------------------- |
-| Data pipeline | Python 3.11, OSMnx, NetworkX, pandas, SRTM via OpenTopography, ERA5-Land via Copernicus CDS |
-| Model         | PyTorch (training in Google Colab), scikit-learn baselines                                  |
-| Backend       | FastAPI, served with Uvicorn (`python -m uvicorn src.api.app:app`)                          |
-| Dashboard     | React, Vite, Leaflet / React Leaflet, OpenStreetMap tiles                                   |
-| Local storage | SQLite (offline schema); browser IndexedDB storage for the pending-report queue             |
-| Planned       | Flutter (field app), external multi-corridor bypass routing                                 |
+---
 
-Exact dependency versions are in `requirements.txt` and `frontend/package.json`.
+## Real-Time Intelligence & Operational Modes
 
-## Dashboard features
+RouteWise is configured at startup using the `ROUTEWISE_LIVE_MODE` environment variable:
 
-The React dashboard (in `frontend/`) presents **retrospective** risk estimates and operational field tooling:
+```text
+ROUTEWISE_LIVE_MODE = "off" | "replay" | "live"
+```
 
-| Feature                 | Description                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| Corridor strip          | Horizontal Ramban–Banihal strip with risk-coloured segments and landmarks (Dewal to Banihal)|
-| Corridor map            | Interactive NH-44 map using Leaflet / React Leaflet with an OpenStreetMap basemap          |
-| Risk-coloured segments  | Each road segment is coloured by its risk tier with non-color accessibility symbols         |
-| Risk-detail drawer      | Opens when a segment is selected, showing score, observation date and genuine input features|
-| Corridor risk breakdown | Counts of high-, medium-, low-risk and unknown/stale segments                              |
-| Segment inspector       | Details of a segment when it is selected                                                   |
-| Observation date        | A date picker plus predefined historical benchmark dates (1,821 dates: 2021 to 2025)        |
-| Status panel            | Backend connection status and model metadata                                               |
-| Theme                   | Light/Dark mode, remembered in the browser's local storage with WCAG AA compliant contrast |
-| Language                | English/Hindi switch (`en.json`, `hi.json`) with persistent preference                      |
-| Disclaimer              | A notice that the view is a retrospective historical reanalysis                            |
+### 1. `ROUTEWISE_LIVE_MODE=off` (Historical Baseline Mode - Default)
+- **Behavior:** Background schedulers, external fetchers, and live polling daemons remain completely inactive.
+- **Data Source:** Serves strictly historical reanalysis data from `cache/precomputed_risk_cache.json` and `data/weather_daily_by_segment.csv` (1,821 dates: 2021 to 2025).
+- **Parity:** Guarantees 100% backward compatibility with all historical baseline tests and golden fixtures. Any attempt by clients to call live-only simulation endpoints returns `HTTP 409 Conflict`.
 
-**Risk tiers.** The model card defines the thresholds as `Low` (score below 0.10), `Medium` (0.10 up to 0.35) and `High` (0.35 or above). Segments with missing or incomplete input are shown as `UNKNOWN` with `risk_score=null` and `status="MISSING_DATA"`, and are never shown as low risk. Dates outside dataset boundaries or with fewer than 7 days of antecedent weather history are flagged with missing-data status.
+### 2. `ROUTEWISE_LIVE_MODE=replay` (Demonstration Replay Mode)
+- **Behavior:** Replays historical weather observations day-by-day from `data/weather_daily_by_segment.csv` as if they were arriving live, storing them into the isolated runtime database `data/runtime/routewise_live.db`.
+- **Purpose:** Enables evaluators, educators, and automated CI pipelines to test the complete end-to-end real-time pipeline, SSE streaming, in-app alerts, dynamic route recalculation, and scenario progression with zero external network dependencies.
+- **UI Tag:** Displays persistent badge: **`REPLAY / simulated scenario`**.
 
-**Risk-detail drawer.** The drawer lists only genuine physical input features exposed by the pipeline for the segment: Elevation ASL (m), Slope gradient (°), Daily precipitation (mm), 3-day rainfall (mm), 7-day cumulative rainfall (mm), and Mean temperature (°C). It is explicitly labelled: *"Input features for this segment; not a model explanation"*.
+### 3. `ROUTEWISE_LIVE_MODE=live` (Live Operational Mode)
+- **Behavior:** Periodically polls numerical weather observations from the Open-Meteo REST API (free tier, no API key required) on a configurable schedule (`LIVE_WEATHER_INTERVAL_MINUTES=60`).
+- **Processing:** Ingests atmospheric metrics across 22 spatial clusters, converts snowfall to ERA5 water-equivalent units, constructs rolling 7-day feature windows, evaluates ST-GNN inference on the fly, and updates derived operational statuses.
+- **UI Tag:** Displays prominent amber badge: **`Live data - Experimental - not validated`**.
 
-**What the dashboard does not show.** It does not show live traffic or live weather. Predictions are retrospective, and a segment colour is a model output, not proof that the model is operationally validated. Official traffic advisories remain the authority on current road status.
+### Runtime Database Isolation
+To ensure absolute integrity of historical research data:
+- `data/routewise_local.db` is strictly protected and read-only.
+- All live weather observations, live risk evaluations, active hazard events, audit logs, and in-app alerts are written strictly to `data/runtime/routewise_live.db` (git-ignored).
+- Simulated demo events (`is_simulated = 1`) reside solely in the runtime database and are permanently excluded from historical training datasets.
 
-## Roles and access control
+---
 
-This role matrix is fully enforced in FastAPI endpoint dependencies and verified by automated tests (`tests/test_api_auth.py`, `tests/test_api_rbac_and_reports.py`):
+## Live Weather Ingestion & Data-Processing Pipeline
 
-| Role   | How obtained                                                                            | Access                                                                                   |
-| ------ | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Guest  | "Continue as Guest" on the welcome page                                                 | Read-only: public risk views, historical observations, journey planning, advisory alerts |
-| User   | Public registration (always creates this role)                                          | Guest access plus submitting field reports and viewing their own reports                 |
-| Patrol | Provisioned by CLI command or admin promotion, never by public registration             | User access plus the patrol dashboard to review, verify, assign and resolve reports      |
+```text
+Open-Meteo REST API  ──(22 Centroids)──>  Spatial Fan-Out (151 Segments)
+                                                  │
+                                                  ▼
+                                      Unit Conversion (10:1 Snow Density)
+                                                  │
+                                                  ▼
+                                     Rolling 7-Day Window Construction
+                                     (weather_window_end = yesterday_utc)
+                                                  │
+                                                  ▼
+                                      Fail-Safe Freshness Audit
+                                  (Age > 24h OR Incomplete -> UNKNOWN)
+                                                  │
+                                                  ▼
+                                        PyTorch ST-GNN Inference
+                                        (stgnn_best.pt Checkpoint)
+                                                  │
+                                                  ▼
+                                      live_risk Database Storage
+```
 
-Design rules:
+### 1. Spatial Clustering
+ERA5-Land reanalysis has a native grid resolution of ~9 km (~0.1°). The 151 segments spanning the 36 km corridor are grouped into **22 spatial grid centroids** using Euclidean nearest-neighbor clustering (`src/services/weather/clustering.py`). During live weather ingestion, requests are dispatched once per centroid and fanned out across member segments, reducing external HTTP network calls by 85%.
 
-- The welcome page is the first screen. Direct links to protected pages go to the welcome page and return to the requested page after sign-in.
-- Roles are enforced in FastAPI dependencies. Hiding a navigation link is a UI convenience, not a security boundary.
-- Missing or invalid credentials return 401. A valid sign-in with insufficient role returns 403.
-- Passwords are hashed with PBKDF2-HMAC-SHA256 (100k iterations). Secrets come from environment variables listed in `.env.example` and are never committed.
-- Guest sessions cannot write data.
-- A user can read only their own reports. Public report views show verified items only and never include reporter identity.
-- Patrol accounts are provisioned via `python -m app.create_patrol` (prompts for password using `getpass.getpass`, never printed to terminal) or `python -m app.seed_demo` (reads `DEMO_PATROL_PASSWORD` from `.env`, creates accounts flagged `is_simulated = 1`).
+### 2. Feature Conversion & Rolling 7-Day Window
+The ST-GNN model requires 7 contiguous dynamic meteorological features:
+- `precip_mm`: Daily total precipitation (mm).
+- `snowfall_mm_we`: Daily snowfall converted to mm water-equivalent assuming an idealized 10:1 snow-to-water density ratio (`1 cm snow = 1.0 mm_we`).
+- `temp_mean_c`: Mean 2-meter air temperature (°C).
+- `temp_min_c`: Minimum 2-meter air temperature (°C).
+- `snow_depth_m`: Surface snow depth (m).
+- `precip_3d_mm`: 3-day cumulative precipitation (mm).
+- `precip_7d_mm`: 7-day cumulative precipitation (mm).
 
-## Field reporting and patrol workflow
+### 3. Strict UTC Window Semantics
+Because the model was trained on calendar days aggregated across UTC midnight (`00:00:00Z to 23:59:59Z`), live inference queries strictly complete historical days:
+$$\text{weather\_window\_end} = \text{yesterday}_{\text{UTC}}$$
+Live predictions publish relative risk for the forward target date ($\text{as\_of} = \text{today}_{\text{UTC}}$).
 
-This workflow is enforced in `src/services/report_service.py` and verified by automated tests:
+### 4. Distribution Shift Limitations
+ECMWF ERA5-Land reanalysis is a retrospective model assimilation, whereas Open-Meteo provides numerical forecast and station-blended measurements. Topographic elevation downscaling in the Pir Panjal range introduces localized precipitation intensity differences. Consequently, RouteWise explicitly discloses that live numerical weather represents an **unvalidated distribution shift**, ensuring users treat scores as situational indices rather than calibrated physical guarantees.
 
-**Report content.** Hazard category (landslide, shooting stones, flooding, road damage, single lane or obstruction, snow or ice, other), GPS coordinates captured from the browser (or chosen on the map if permission is refused), an optional description and an optional photo.
+---
 
-**Status flow.** `submitted → verified → assigned → resolved`, with `rejected` available to patrol personnel with a note. The server checks every transition and keeps a history of who changed what and when.
+## Operational Hazard Events & Status Management
 
-**Pending queue.** Reports are saved in the browser first and sent when the connection is available. Each queued item keeps a client-generated identifier so that a retry never creates a duplicate. Failed items stay visible with the reason and can be retried or discarded.
+Active hazard events (field reports, operator simulations, official TCU advisories) act as an **operational overlay**. They **never modify model weights, model input tensors, or calculated ST-GNN risk scores**. The API returns both `model_risk` and `active_events[]`, synthesizing them into a derived `operational_status`.
 
-**What this is not.** It is an offline-tolerant report queue in the web app. It is not the planned Flutter field app, it is not a full offline-first application, and it does not run any automated analysis on photos. A human reviewer looks at each photo.
+### Deterministic Operational Status Rule Table
 
-## Language support
+| Priority | Evaluated Condition | Resulting `operational_status` | Operational Meaning |
+|:---:|---|:---:|---|
+| **1** | Any active event with `severity == 'critical'` OR `hazard_type in ('landslide', 'flooding')` | **`CLOSED`** | Road physically blocked or impassable. Traffic must hold. |
+| **2** | Any active event with `hazard_type in ('single_lane', 'single-lane')` OR `severity == 'high'` OR (`hazard_type in ('shooting_stones', 'snow_ice', 'road_damage')` AND `severity == 'medium'`) | **`RESTRICTED`** | Reduced capacity, convoys, or severe slowdown. Proceed with caution. |
+| **3** | Model input is missing (< 7 days) or stale (> 24h) AND no critical/blocking physical event | **`UNKNOWN`** | Telemetry deficit: advisory status cannot be safely determined. Never defaults to Low/Open. |
+| **4** | Active event with `severity in ('low', 'medium')` OR `model_risk.risk_tier in ('Medium', 'High')` | **`CAUTION`** | Elevated hazard potential or minor localized disturbance. |
+| **5** | `model_risk.risk_tier == 'Low'` AND zero active events on the segment | **`OPEN`** | Normal operational flow under standard advisory guidelines. |
 
-The interface supports English and Hindi (`en.json`, `hi.json`). Advisory alerts are built from fixed templates filled with real values (segment, risk tier, date). They are shown in the app only; there is no SMS or push delivery. The Hindi text has not been reviewed by a native speaker; see `docs/TRANSLATION_REVIEW.md`.
+---
 
-## API documentation
+## Incident Reporting & Conservative Deduplication
 
-The FastAPI application is `src.api.app:app`, started as described in [Running the backend and frontend](#running-the-backend-and-frontend). With the backend running, FastAPI's generated documentation is the source of truth for every endpoint, parameter and response schema:
+RouteWise provides an incident reporting and deduplication engine (Task 4) designed to handle crowd-sourced observations while preventing duplicate hazard clutter on the corridor.
 
-- Interactive docs: <http://127.0.0.1:8000/docs>
-- OpenAPI schema: <http://127.0.0.1:8000/openapi.json>
+### 1. Supported Report Categories & Normalization
+The API accepts 7 distinct `ReportCategory` values:
+- `landslide`: Maps to preset `landslide` (Severity: critical, Duration: 24h).
+- `shooting_stones`: Maps to preset `shooting_stones` (Severity: high, Duration: 12h).
+- `flooding`: Maps to preset `flooding` (Severity: critical, Duration: 12h).
+- `road_damage`: Maps to preset `road_damage` (Severity: medium, Duration: 48h).
+- `snow_or_ice`: Falls back to `road_damage` in accordance with `VALID_PRESETS`.
+- `single_lane_or_obstruction`: Falls back to `road_damage` in accordance with `VALID_PRESETS`.
+- `other`: Falls back to `road_damage` in accordance with `VALID_PRESETS`.
 
-The interactive OpenAPI documentation is generated live by FastAPI:
+**Preset Separation:** Reports submitted with different preset categories on the same segment create independent hazard events. Reports submitted with fallback categories merge into existing active road-damage events as corroborating duplicates.
 
-- Interactive docs: <http://127.0.0.1:8000/docs>
-- OpenAPI schema: <http://127.0.0.1:8000/openapi.json>
+### 2. Dual-Timestamp Deduplication Window (24.0 Hours)
+When a report is submitted, RouteWise evaluates active hazard events on the snapped segment matching the normalized hazard type and simulation mode:
+```sql
+WHERE segment_id = :segment_id
+  AND hazard_type = :hazard_type
+  AND COALESCE(is_simulated, 0) = :is_simulated
+  AND status = 'active'
+  AND expires_at > :now
+  AND (created_at >= :dedup_limit OR (last_reported_at IS NOT NULL AND last_reported_at >= :dedup_limit))
+ORDER BY created_at ASC
+LIMIT 1
+```
+If an active event exists within this window, the incoming report is linked as a duplicate:
+- `reports.duplicate_of = primary_report.id`
+- `reports.hazard_event_id = active_event.id`
+- `hazard_event.report_count = report_count + 1`
 
-| Purpose                                         | Method and path                                         | Required role | Status   |
-| ----------------------------------------------- | ------------------------------------------------------- | ------------- | -------- |
-| Health / connection check used by the dashboard | `GET /api/health`                                       | none          | Verified |
-| Model metadata (version, checkpoint hash)       | `GET /` and `GET /api/health`                           | none          | Verified |
-| Segment risk & historical dates                 | `GET /api/v1/risk`, `GET /api/v1/risk/dates`            | none          | Verified |
-| Register, sign in, guest session                | `POST /api/v1/auth/register`, `login`, `guest`          | none          | Verified |
-| Create and list own field reports               | `POST /api/v1/reports`, `GET /api/v1/reports/mine`      | user, patrol  | Verified |
-| Review, verify, assign, resolve reports         | `GET /api/v1/reports`, `PATCH .../status`, `.../assign` | patrol        | Verified |
-| Corridor geometry and input features            | `GET /api/v1/corridor/segments`, `.../features`         | none          | Verified |
-| Corridor journey planner and advisories         | `POST /api/v1/journey/plan`, `GET .../advisories`       | none          | Verified |
+### 3. Verified-Only Window Extension
+To prevent malicious or spam submissions from artificially keeping a hazard open indefinitely, **`last_reported_at` updates and extends the deduplication window only when a corroborating report is marked `verified` by an authorized patrol officer or administrator**. Unverified submissions do not extend the active lifecycle.
 
-**Model identity (from the model card).** Version `1.0.0-w7`, checkpoint `stgnn_best.pt`, SHA-256 `68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F963D335054006E`.
+### 4. Primary vs. Duplicate Rejection Semantics
+- **Rejecting the Primary Report:** Immediately transitions the active hazard event to `closed`. Any duplicate reports that were linked remain preserved in `reports` for audit history.
+- **Rejecting a Duplicate Report:** Sets `duplicate_of = NULL` on that report, leaving the active hazard event open.
 
-**How risk values are produced.** The API service (`src/services/risk_service.py`) checks `cache/precomputed_risk_cache.json` first for instantaneous lookup across 1,821 historical observation dates (2021–2025). If a date is not present in cache, it evaluates PyTorch neural inference on the fly using `stgnn_best.pt` via `src/models/inference.py`.
+### 5. Fail-Closed Protected Database Guard
+`src/services/report_service.py` enforces a fail-closed write guard (`_is_protected_db(path)`) that treats any unresolved or historical database path as protected, ensuring that tests and operational services cannot alter `data/routewise_local.db`.
 
-**Risk output contract (from the model card).** Each segment has a `risk_score` between 0 and 1 and a `risk_tier` of `LOW`, `MEDIUM`, `HIGH` or `UNKNOWN`.
+---
 
-| Condition                                                         | `risk_tier`               | `risk_score` | Other fields                   |
-| ----------------------------------------------------------------- | ------------------------- | ------------ | ------------------------------ |
-| Normal                                                            | `LOW`, `MEDIUM` or `HIGH` | 0 to 1       |                                |
-| `MISSING_DATA`: fewer than 7 days of weather, or missing topology | `UNKNOWN`                 | `null`       | `status: "MISSING_DATA"`       |
-| `STALE_DATA`: input observation older than 24 hours               | `UNKNOWN`                 |              | `is_stale: true` and a warning |
+## Patrol Operations & Verification Lifecycle
 
-## Data sources and preparation
+Field observations follow a strict state-machine lifecycle enforced in `src/services/report_service.py`:
 
-| Data              | Source                                                                                          | Used for                     |
-| ----------------- | ----------------------------------------------------------------------------------------------- | ---------------------------- |
-| Road network      | OpenStreetMap contributors, via OSMnx                                                           | Corridor graph               |
-| Elevation         | SRTM, via OpenTopography (about 30 m)                                                           | Slope and elevation features |
-| Weather           | ERA5-Land, Copernicus Climate Change Service (about 9 km), 2021–2025                            | Dynamic features             |
-| Disruption events | News reports (Greater Kashmir, The Tribune, Kashmir Life, Deccan Herald, ETV Bharat and others) | Labels                       |
+```text
+[submitted] ──(Patrol Verifies)──> [verified] ──(Unit Assigned)──> [assigned] ──(Cleared)──> [resolved]
+     │                                  │
+     └──────────(Spurious / Duplicate)──┴──────(Patrol Rejects with Note)───────────────> [rejected]
+```
 
-Every event in `data/disruption_candidates.csv` has a source link. No event is invented or simulated. Verified: all 1,981 rows in `data/training_samples.csv` have `is_simulated = 0` (zero simulated records in the training dataset).
+### Audit Trail & Independent Reporter Tracking
+- Every transition appends an immutable entry to `report_status_history` logging `actor_id`, `actor_role`, `from_status`, `to_status`, `timestamp`, and mandatory rejection `note`.
+- When corroborating reports are linked to an active hazard, the system tracks reporter independence: repeated submissions by the same user do not inflate independent reporter counts.
 
-Simulated demo records, such as sample field reports or a demonstration patrol account, are separate from this training data. They must be created only by an explicit seed command, marked as simulated in the database (`is_simulated = 1`) and badged in the interface.
+---
 
-**Large files in the repository.** The checkpoint `stgnn_best.pt`, the ERA5-Land files `data/weather/era5land_2021.nc` to `era5land_2025.nc` and the files in `cache/` are tracked in Git. The repository is public; credentials and environment secrets are excluded and never committed (use `.env.example` as a template). If a file ever exceeds GitHub's 100 MB limit, use Git LFS or host it elsewhere and link it here.
+## Live Dashboard, SSE Streaming & Resilience
 
-**Preparation scripts**
+The React dashboard maintains a resilient real-time connection to the backend via Server-Sent Events (SSE):
 
-| Script                                           | What it does                                                                                                                                                                                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `week1_graph_and_terrain.py`                     | Builds the road graph from OpenStreetMap (76 junction nodes and 151 road-segment edges; the model treats each of the 151 segments as a graph node), adds SRTM elevation and slope, and saves `nh44_corridor_graph.graphml` and a map |
-| `week2a_download_weather.py`                     | Downloads ERA5-Land weather (2021 to 2025) for the corridor                                                                                                                                                                          |
-| `week2b_process_weather.py`                      | Converts weather into one table of daily values per road segment, with 3-day and 7-day rainfall                                                                                                                                      |
-| `week2c_fill_from_candidates.py`                 | Looks up coordinates for the sourced disruption events in `data/disruption_candidates.csv` and writes `data/disruption_log.csv`                                                                                                      |
-| `week2c_disruption_log.py`                       | Snaps logged events to the nearest NH-44 segment and writes `data/labelled_events.csv` and `data/events_map.png`                                                                                                                     |
-| `week3_offline_schema.sql`, `week3_create_db.py` | Offline SQLite schema (hazard reports, photos, risk cache, sync queue) and a test of it                                                                                                                                              |
-| `week4_build_dataset.py`                         | Builds the model's training tables with a time-based split. This is dataset preparation, not the timeline's week 4 (the mobile app)                                                                                                  |
-| `week6_stgnn.py`                                 | Builds 7-day weather windows per segment, defines the ST-GNN, and fits two logistic-regression baselines. Writes `week6_baseline_metrics.json`                                                                                       |
-| `week7_train.py`                                 | Trains the ST-GNN over 5 random seeds with early stopping, scores it on the held-out years, and saves `stgnn_best.pt` and `stgnn_metrics.json`                                                                                       |
-| `scripts/precompute_risk.py`                     | Precomputes risk values across 1,821 historical dates into `cache/precomputed_risk_cache.json` using `stgnn_best.pt`. Rebuild only after model weights or weather data change                                                      |
+### Connection States (`connectionResilience.js`)
+- **`connected`:** Receiving active SSE events and 20-second heartbeats.
+- **`reconnecting`:** Stream interrupted; reconnects using exponential backoff with full random jitter (base 1s, factor 2, capped at 30 seconds).
+- **`polling`:** When disconnected or in degraded environments, falls back to REST polling every 10–30 seconds.
+- **`offline`:** Browser network offline.
 
-Before `week2c_fill_from_candidates.py`, fill in `data/place_coordinates.csv` (latitude and longitude of each named place, from Google Maps). Place-name lookup alone puts many events at the town centre.
+### Top-Level Error Boundary
+`frontend/src/components/ErrorBoundary.jsx` wraps the React component tree. If an uncaught rendering error occurs, it traps the exception, logs component stack traces, and renders a localized bilingual fallback with an application reload button.
 
-## ST-GNN methodology and results
+---
 
-**Architecture.** For each of the 151 road segments the model reads the previous 7 days of weather (7 dynamic features; rainfall is log-scaled and all features are standardised with pre-2023 statistics only). Two graph-convolution layers mix each segment's features with its neighbours' (from `segment_adjacency.csv`, 966 directed connections), a GRU reads the 7 days in order, and a small head combines the result with the 4 static segment features (length, slope, elevation, primary-road flag) to output a risk score. The score is read as an advisory index for the next day (T+1).
+## Journey Planning & Corridor Advisories
 
-**Training.** Weighted binary cross-entropy (`pos_weight` about 30) because disruptions are rare. Negatives are sampled at about 1:30 (half uniformly random days, half from the wettest 10% of days). Early stopping uses average precision on the 2023 validation year. The run is repeated over 5 random seeds and the mean and spread are reported.
+The RouteWise Journey Planner evaluates transit feasibility along the 151 segments of NH-44:
 
-**Chronological data split**
+### 1. Single-Corridor Honesty Constraint
+The NH-44 Ramban–Banihal highway traverses a narrow mountain gorge with no parallel bypasses. RouteWise strictly enforces `has_alternative=False`. The router will never invent synthetic detour roads.
 
-| Split      | Period           | Samples | Real events | Base rate |
-| ---------- | ---------------- | ------- | ----------- | --------- |
-| Train      | up to 2022-12-31 | 855     | 28          | 3.27%     |
-| Validation | 2023             | 434     | 14          | 3.23%     |
-| Test       | 2024 to 2025     | 680     | 22          | 3.24%     |
+### 2. Operational Recommendations & Reason Formatting
+Routing recommendations dynamically evaluate physical status and hazard risk:
+- **`HOLD`:** One or more segments on the route are physically `CLOSED`. Advises holding at the nearest staging depot (e.g. *"Corridor is blocked by 1 closed segment (seg_050) due to active hazard. Hold at nearest staging yard."*). Never cites zero counts.
+- **`NO_DATA`:** Route includes unmonitored segments or live telemetry is stale (>24h).
+- **`DELAY`:** High disruption hazard tier ($\ge 0.35$) detected along the corridor.
+- **`PROCEED_WITH_CAUTION`:** Elevated hazard score ($0.10 - 0.35$) on segments.
+- **`PROCEED`:** All corridor segments clear and baseline risk is low ($< 0.10$).
 
-**Tuning.** A small search over hidden size (16, 32, 64) and learning rate (1e-3, 3e-3). The final setting is hidden size 32, dropout 0.2 and learning rate 3e-3, chosen by mean validation average precision, not by test score.
+### 3. Live Date Substitution Notice
+When querying a journey plan in live mode for a requested date lacking live telemetry, the service evaluates the route using the latest live date and returns:
+- `date_substituted: true`
+- `requested_date: "2023-07-09"`
+- `actual_date: "2026-11-10"`
 
-**Results** (held-out test years 2024 to 2025, average precision; higher is better)
+The frontend presents a prominent translated notice explaining the substitution.
 
-| Model                                                          | Test AP         |
-| -------------------------------------------------------------- | --------------- |
-| Random guessing (base rate)                                    | 0.032           |
-| Rainfall-only logistic regression                              | 0.105           |
-| All-features logistic regression                               | 0.174           |
-| ST-GNN (mean of 5 seeds)                                       | 0.215 +/- 0.041 |
-| ST-GNN checkpoint `stgnn_best.pt` (best seed by validation AP) | 0.259           |
+---
 
-The 5-seed mean is the fair summary: about 7 times random guessing and about 2 times the rainfall-only baseline. The 0.259 figure is a single checkpoint chosen from the seeds, so it is the more optimistic number. The ST-GNN's edge over the all-features logistic regression is small compared with the spread between seeds, and the test set has only 22 events.
+## Dashboard Features & Accessibility
 
-**Risk tiers on the held-out test set** (thresholds frozen on the 2023 validation split, 22 events)
+| Feature | Description |
+| :--- | :--- |
+| **Corridor Strip** | Horizontal 151-segment strip with chainage landmarks from Dewal (Km 0) to Banihal (Km 36). |
+| **Interactive Map** | Leaflet / React-Leaflet map with toggleable layers: Risk, Field Reports, Weather, Services. |
+| **Non-Color Accessibility Cues** | Geometric symbols ensure accessibility for color-blind users: `●` Low, `■` Medium, `▲` High, `?` Unknown, `~` Stale. |
+| **WCAG AA Contrast Tokens** | High-contrast semantic CSS tokens in `frontend/src/theme.css` verified for WCAG AA compliance (≥ 4.5:1 text contrast). |
+| **Segment Inspector** | Detailed slide-out drawer presenting genuine physical input features (elevation, slope, precipitation). |
+| **Scenario Player** | Steppable demonstration player simulating the accelerated 5-phase July 2023 monsoon storm sequence. |
+| **Alert Drawer** | In-app notification drawer for active corridor disruption alerts with patrol acknowledgement. |
 
-| Metric                 | Medium tier or above (0.10) | High tier (0.35) |
-| ---------------------- | --------------------------- | ---------------- |
-| Events caught (recall) | 18 of 22 (81.8%)            | 13 of 22 (59.1%) |
-| Events missed          | 4                           | 9                |
-| False alarms           | 249                         | 90               |
-| Precision              | 6.7%                        | 12.6%            |
+---
 
-Most flagged segments are false alarms, and the High tier still misses about 41% of events. Use the scores to rank segments, not to decide that a road is safe.
+## Roles and Access Control
 
-**Calibration.** Brier score 0.0787 on validation and 0.0719 on test; expected calibration error 0.1308. Because the model is trained on sampled negatives with a weighted loss, scores are an advisory risk index, not event probabilities.
+| Role | How Obtained | Access Permissions |
+| :--- | :--- | :--- |
+| **Guest** | "Continue as Guest" on landing page | Read-only access to corridor map, risk strips, journey planner, and alerts. Cannot submit reports. |
+| **User** | Public registration (`/auth/register`) | Guest access plus submitting field reports with photos and viewing personal submission history. |
+| **Patrol** | Provisioned via CLI (`create_patrol`) | User access plus Patrol Operations dashboard: verifying, assigning, and resolving field reports. |
+| **Admin** | Provisioned via database bootstrap / promote | Patrol access plus user role management and triggering/clearing simulated hazard events. |
 
-**Inference speed.** On a local CPU, a full-corridor evaluation (151 segments) took a median of 67.6 ms and a 95th percentile of 137.3 ms over 1,821 historical dates.
+- Passwords are encrypted using PBKDF2-HMAC-SHA256 (100,000 iterations, 16-byte random salt).
+- Sessions authenticate via signed HS256 JWT tokens.
 
-**Model outputs**
+---
 
-| File                          | What it holds                                                                           |
-| ----------------------------- | --------------------------------------------------------------------------------------- |
-| `stgnn_best.pt`               | Model weights, normalisation statistics, segment order and column names, saved together |
-| `stgnn_metrics.json`          | Per-seed and mean scores of the final model, plus the baselines                         |
-| `stgnn_metrics_default.json`  | Scores of the earlier run with default settings (learning rate 1e-3)                    |
-| `week6_baseline_metrics.json` | Scores of the two logistic-regression baselines                                         |
-| `model_card.md`               | Intended use, results, thresholds, calibration, latency and limitations                 |
+## Language Support
 
-## Installation and setup
+The dashboard provides bilingual localization across English and Hindi (`en.json`, `hi.json`):
+- Translation preferences persist across sessions.
+- In accordance with safety disclosures, Hindi translations are machine-assisted domain localizations that have not yet been certified by a native-speaking transport linguist (`docs/TRANSLATION_REVIEW.md`).
+- All alerts and advisories are delivered strictly in-app.
 
-Requirements: Windows with PowerShell, Python 3.11, and Node.js 18+ for the dashboard.
+---
 
-### Python environment
+## API Documentation
 
-Run from the project root:
+FastAPI automatically generates interactive OpenAPI documentation when the backend is running:
+- **Interactive Swagger UI:** <http://127.0.0.1:8000/docs>
+- **OpenAPI JSON Schema:** <http://127.0.0.1:8000/openapi.json>
 
+### Core Endpoint Catalog
+
+| Group | Method & Path | Required Role | Description |
+| :--- | :--- | :---: | :--- |
+| **System** | `GET /api/health` | None | Health check, model version, checkpoint hash |
+| **Auth** | `POST /api/v1/auth/register` | None | Register new commuter (`user` role strictly forced) |
+| | `POST /api/v1/auth/login` | None | Sign in, receive signed JWT access token |
+| | `POST /api/v1/auth/guest` | None | Issue read-only guest session token |
+| | `GET /api/v1/auth/me` | User | Retrieve current user profile |
+| **Risk** | `GET /api/v1/risk` | None | Retrospective segment risk scores for observation date |
+| | `GET /api/v1/risk/dates` | None | Catalog of 1,821 historical observation dates (2021–2025) |
+| **Corridor** | `GET /api/v1/corridor/segments` | None | 151 segment GeoJSON geometries & metadata |
+| | `GET /api/v1/corridor/segments/{id}/features` | None | Static terrain & environmental features |
+| | `GET /api/v1/corridor/services` | None | Along-route medical, fuel, and recovery facilities |
+| **Journey** | `GET /api/v1/journey/places` | None | Landmarks and towns along NH-44 |
+| | `POST /api/v1/journey/plan` | None | Physical chainage routing with risk & hold advisories |
+| **Live** | `GET /api/v1/live/status` | None | Current live telemetry status, provider, weather window |
+| | `GET /api/v1/live/risk` | None | Current live risk scores & operational statuses |
+| | `GET /api/v1/live/stream` | None | Server-Sent Events real-time broadcast stream |
+| **Events** | `GET /api/v1/events/active` | None | Active public hazard events overlay |
+| | `POST /api/v1/events/simulate` | Admin | Trigger simulated hazard event on a segment |
+| | `POST /api/v1/events/simulate/clear` | Admin | Purge all simulated hazard events |
+| **Reports** | `POST /api/v1/reports` | User | Submit field report (client-UUID idempotent, deduplicated) |
+| | `GET /api/v1/reports` | Patrol | List all submitted reports for patrol review |
+| | `GET /api/v1/reports/mine` | User | List reports submitted by authenticated user |
+| | `PATCH /api/v1/reports/{id}/status` | Patrol | Transition report state machine (`verified`, `resolved`, `rejected`) |
+| | `GET /api/v1/reports/{id}/photo` | User | Secure retrieval of attached photo evidence |
+| **Alerts** | `GET /api/v1/alerts/active` | None | Active corridor disruption alerts |
+| | `POST /api/v1/alerts/{id}/acknowledge` | Patrol | Acknowledge active alert |
+| | `POST /api/v1/alerts/{id}/clear` | Patrol | Clear active alert |
+| | `POST /api/v1/alerts/scenario/step` | Admin | Step July 2023 monsoon demonstration scenario |
+
+---
+
+## Data Sources and Preparation
+
+| Dataset | Source | Spatial / Temporal Resolution | Usage |
+| :--- | :--- | :--- | :--- |
+| **Road Network** | OpenStreetMap via OSMnx | 151 segment edges, 76 junction nodes | Topological corridor graph |
+| **Elevation & Slope** | USGS SRTM via OpenTopography | ~30m raster grid | Static terrain slope and elevation features |
+| **Atmospheric Weather** | Copernicus ERA5-Land Reanalysis | ~9 km grid, daily (2021–2025) | Dynamic precipitation and temperature inputs |
+| **Historical Disruptions** | Regional news archives (Greater Kashmir, Tribune) | 99 verified physical road closures | Ground-truth training and validation labels |
+
+Every historical event in `data/disruption_candidates.csv` has a verifiable news source link; zero simulated events exist in historical training tables (`data/training_samples.csv` has `is_simulated = 0` for all 1,981 records).
+
+---
+
+## ST-GNN Methodology and Results
+
+- **Model Architecture:** 2 graph convolution layers (mixing features across 966 directed segment adjacency connections) + GRU recurrent cell (reading 7 daily sequential feature vectors) + linear projection combining temporal representation with 4 static terrain features.
+- **Chronological Split:** Train (pre-2023, 855 samples, 28 events), Validation (2023, 434 samples, 14 events), Held-out Test (2024–2025, 680 samples, 22 events).
+- **Test Set Performance (Held-out 2024–2025):**
+  - Base Rate (Random Guessing): 0.032 AP
+  - Rainfall-Only Logistic Regression: 0.105 AP
+  - All-Features Logistic Regression: 0.174 AP
+  - **ST-GNN (5-Seed Mean):** **0.215 ± 0.041 AP**
+  - **ST-GNN (`stgnn_best.pt` Best Seed):** **0.259 AP**
+- **Thresholds on Held-out Events (22 Real Events):**
+  - Medium Tier ($\ge 0.10$): Caught 18/22 events (81.8% recall), 249 false alarms.
+  - High Tier ($\ge 0.35$): Caught 13/22 events (59.1% recall), 90 false alarms.
+- **Inference Latency:** Local CPU inference evaluates all 151 segments in median 67.6 ms (P95: 137.3 ms).
+
+---
+
+## Installation and Setup
+
+### Prerequisites
+- Windows 10/11 with PowerShell (or Linux / macOS)
+- Python 3.11
+- Node.js 18+ and npm
+
+### 1. Python Virtual Environment
+From project root:
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-If you plan to run or regenerate the offline GIS and weather download pipelines (Weeks 1–4), install the data pipeline requirements:
-
-```powershell
-python -m pip install -r requirements-pipeline.txt
-```
-
-### Database bootstrap
-
-Initialize the SQLite database schema and load historical segment weather data:
-
+### 2. Database Bootstrap
+Initialize the SQLite database schema and populate historical segment weather data:
 ```powershell
 python -m app.bootstrap_db
 ```
+Populates 274,971 historical segment weather rows idempotently into `data/routewise_local.db`.
 
-This creates the tables (`users`, `reports`, `report_status_history`, `segment_weather`) and indexes idempotently at `data/routewise_local.db`, populating 274,971 segment weather rows from `data/weather_daily_by_segment.csv`.
-
-### Environment variables and configuration (never commit .env)
-
-Copy `.env.example` to `.env` and configure your settings:
-
+### 3. Environment Configuration
+Copy `.env.example` to `.env` and configure settings:
 ```powershell
 cp .env.example .env
 ```
+Key configuration parameters:
+- `ROUTEWISE_LIVE_MODE`: Operational mode (`off`, `replay`, `live`).
+- `ROUTEWISE_SECRET_KEY`: Minimum 32-character secret key for JWT signing.
+- `ROUTEWISE_LIVE_DB_PATH`: Runtime operational database path (`data/runtime/routewise_live.db`).
+- `DEMO_PATROL_PASSWORD`, `DEMO_USER_PASSWORD`: Passwords for seeded demo accounts.
 
-The configuration template (`.env.example`) defines the following environment variable names:
+---
 
-- **Security & Authentication:** `ROUTEWISE_SECRET_KEY`, `ROUTEWISE_TOKEN_EXPIRE_HOURS`, `ROUTEWISE_GUEST_EXPIRE_HOURS`, `ROUTEWISE_DEMO_MODE`, `DEMO_PATROL_PASSWORD`, `DEMO_USER_PASSWORD`
-- **Server Hosting & CORS:** `ROUTEWISE_HOST`, `ROUTEWISE_PORT`, `ROUTEWISE_DEBUG`, `ROUTEWISE_CORS_ORIGINS`
-- **Uploads & File Limits:** `ROUTEWISE_MAX_UPLOAD_BYTES`, `ROUTEWISE_UPLOADS_DIR`
-- **Data & Model Paths:** `ROUTEWISE_CACHE_PATH`, `ROUTEWISE_GRAPH_PATH`, `ROUTEWISE_STATIC_PATH`, `ROUTEWISE_CHECKPOINT_PATH`, `ROUTEWISE_DB_PATH`, `ROUTEWISE_DISRUPTIONS_PATH`, `ROUTEWISE_PLACES_PATH`, `ROUTEWISE_WEATHER_PATH`
-- **External API Keys (Optional):** `GEMINI_API_KEY`, `OPENTOPO_API_KEY`
+## Running the Backend and Frontend
 
-`.env`, `venv/`, `node_modules/`, `data/uploads/`, and database files are excluded by `.gitignore` and must never be committed. Run `python scripts/check_repo_hygiene.py` to verify repository cleanliness before committing.
+Run the services in two separate terminal sessions:
 
-### Data pipeline (only needed to rebuild datasets from scratch)
-
-Skip this unless you are regenerating data. See the warnings in [Protecting existing assets](#protecting-existing-assets).
-
+### Terminal 1: Backend API
 ```powershell
-python week1_graph_and_terrain.py
-python week2a_download_weather.py
-python week2b_process_weather.py
-python week2c_fill_from_candidates.py
-python week2c_disruption_log.py
-python week3_create_db.py
-python week4_build_dataset.py
-```
-
-### Model training (Google Colab)
-
-1. Upload `training_samples.csv`, `segment_static.csv`, `segment_adjacency.csv`, `weather_daily_by_segment.csv`, `week6_stgnn.py` and `week7_train.py` to one Drive folder.
-2. Open a notebook, mount Drive and go to that folder:
-
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-%cd /content/drive/MyDrive/RouteWise/model
-```
-
-3. Run the checks, baselines and training. Use a new `--out-dir` so the trained model is not overwritten:
-
-```python
-!python week6_stgnn.py --check
-!python week6_stgnn.py
-!python week7_train.py --data-dir . --out-dir runs/rerun1
-```
-
-4. Download the new files and compare them with the existing ones before replacing anything.
-
-### Protecting existing assets
-
-Do not regenerate or overwrite these casually. Back them up first and write new output to a versioned path.
-
-| Asset                                               | Risk                                                                                                                                                                           |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `stgnn_best.pt`                                     | `week7_train.py` writes it to `--out-dir`. The dashboard and model card depend on the existing checkpoint (SHA-256: `68B04504EAE6062C84927917C05168C34FD17823BA5EF5C13F963D335054006E`)     |
-| `data/` and the training CSVs                       | `week4_build_dataset.py` and the `week2*` scripts rewrite them; results and the model card depend on current versions                                                          |
-| `cache/precomputed_risk_cache.json`                 | Stores precomputed inference for 1,821 historical dates. Rebuild only after the checkpoint or data change                                                                     |
-| `routewise_local.db`                                | Recreated via `python -m app.bootstrap_db`                                                                                                                                    |
-| `stgnn_metrics.json`, `week6_baseline_metrics.json` | These are the evidence for the published results                                                                                                                               |
-
-## Running the backend and frontend
-
-Both servers must be running for the dashboard to show data. Use two PowerShell windows:
-
-**Terminal 1: backend** (from the project root)
-
-```powershell
+.\venv\Scripts\Activate.ps1
 python -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000 --reload
 ```
+- API Docs: <http://127.0.0.1:8000/docs>
+- Health Check: <http://127.0.0.1:8000/api/health>
 
-- API documentation: <http://127.0.0.1:8000/docs>
-- Health check: <http://127.0.0.1:8000/api/health>
-
-**Terminal 2: frontend**
-
+### Terminal 2: Frontend Dashboard
 ```powershell
 cd frontend
-npm install     # first time or after dependency updates
+npm install
 npm run dev
 ```
+Dashboard opens at: <http://localhost:5173>
 
-Vite prints the local dashboard address when it starts (default: <http://localhost:5173>).
-
-**Provisioning accounts and demonstration data:**
-
-1. **Provision a Patrol Officer account (Interactive CLI):**
+### Provisioning Accounts & Demonstration Data
+1. **Interactive Patrol Creation:**
    ```powershell
-   python -m app.create_patrol --email officer@routewise.ai --name "Inspector Amit Rathore"
+   python -m app.create_patrol --email officer@routewise.ai --name "Officer Singh"
    ```
-   Prompts for the password securely via `getpass.getpass` (never echoed or printed to stdout).
-
-2. **Seed simulated demonstration accounts and reports:**
+   Prompts securely for password using `getpass.getpass` (never printed to terminal).
+2. **Seed Simulated Demonstration Incidents:**
    ```powershell
    python -m app.seed_demo
    ```
-   Reads `DEMO_PATROL_PASSWORD` and `DEMO_USER_PASSWORD` from `.env`, creates `patrol@routewise.ai` and `demo@routewise.ai` (flagged `is_simulated = 1`), and populates 5 realistic simulated corridor incidents. Passwords are never printed.
-
-3. **Purge simulated demonstration records:**
+   Creates `patrol@routewise.ai` and `demo@routewise.ai` (flagged `is_simulated = 1`) and seeds 5 sample corridor reports.
+3. **Purge Simulated Data:**
    ```powershell
    python -m app.seed_demo --clear
    ```
-   Deletes all users, reports, and audit history records flagged `is_simulated = 1`.
+   Wipes all simulated reports and demo accounts instantly.
 
-## Testing
+---
 
-The automated test suite covers unit and integration tests across backend services and frontend components.
+## Testing Instructions & Verified Evidence
 
-**Backend tests (61 passing tests across 12 test files):**
-
+### 1. Full Backend Test Suite (All 3 Operational Modes)
+Run the complete backend suite across each supported mode:
 ```powershell
-python -m pytest
+# Off mode (pure historical parity)
+$env:ROUTEWISE_LIVE_MODE="off"; .\venv\Scripts\python.exe -m pytest -q
+# Result: 206 passed, 4 warnings in 93.53s
+
+# Replay mode (isolated storm playback)
+$env:ROUTEWISE_LIVE_MODE="replay"; .\venv\Scripts\python.exe -m pytest -q
+# Result: 206 passed, 4 warnings in 74.23s
+
+# Live mode (Open-Meteo clustering ingestion)
+$env:ROUTEWISE_LIVE_MODE="live"; .\venv\Scripts\python.exe -m pytest -q
+# Result: 206 passed, 4 warnings in 73.38s
 ```
 
-Coverage includes:
-- **Authentication & RBAC:** Role enforcement (`guest`, `user`, `patrol`, `admin`), JWT tokens, password hashing, demo credentials sanitation (`tests/test_api_auth.py`, `tests/test_api_rbac_and_reports.py`).
-- **Corridor & Risk Evaluation:** 151 segments, SRTM/ERA5 features, 1,821 historical observation dates, missing-data UNKNOWN handling (`tests/test_api_corridor.py`, `tests/test_api_risk.py`, `tests/test_inference.py`, `tests/test_calibration.py`).
-- **Journey Planner Correctness:** Physical chainage-ordered routing along the linear NH-44 corridor, hazard scoring, vehicle hold advisories (`tests/test_api_journey.py`, `tests/test_routing_algorithm.py`).
-- **Field Reports Lifecycle:** Idempotent submission via client UUID, transition state machine (`submitted` -> `verified` -> `assigned` -> `resolved`, or `rejected`), photo upload validation and EXIF metadata stripping (`tests/test_api_rbac_and_reports.py`, `tests/test_api_disruptions.py`).
-- **System Health & Regression:** Baseline schema validation and regression endpoints (`tests/test_api_health.py`, `tests/test_api_chat.py`, `tests/test_regression_baseline.py`).
+### 2. Incident Deduplication Backend Suite
+```powershell
+.\venv\Scripts\python.exe -m pytest tests/test_incident_deduplication.py -q
+# Result: 34 passed, 1 warning in 12.38s
+```
 
-**Frontend tests (13 passing tests across 5 suites):**
+### 3. Historical Golden Tests
+```powershell
+.\venv\Scripts\python.exe -m pytest tests/test_journey_golden.py -q
+# Result: 6 passed in 2.73s
+```
 
+### 4. Frontend Unit Tests
 ```powershell
 npm --prefix frontend test
+# Result: 49 passed, 0 failed across 14 suites in 1.99s
 ```
 
-Verifies the persistent IndexedDB sync queue, backoff retry calculations, client UUID generation, route guards, deep-linking, and i18n English/Hindi translation key completeness.
-
-**Frontend production build:**
-
+### 5. Frontend Production Build
 ```powershell
-cd frontend
-npm run build
+npm --prefix frontend run build
+# Result: Vite v6.4.4 build succeeded in 6.35s
 ```
 
-**Repository hygiene audit:**
-
+### 6. Repository Hygiene & Protected Hash Audit
 ```powershell
-python scripts/check_repo_hygiene.py
+git diff --check
+Get-FileHash data/routewise_local.db
+# SHA-256: 917A1C475E2FF2D8D9E877F9321BEDF1D99F1877D446EE4667D86FA3E3D96BC6
 ```
 
-The model smoke test is `python week6_stgnn.py`, which runs a forward and backward pass.
+### Automated Testing vs. Manual Browser Verification
+- **Automated Verification:** All API endpoints, state machines, math models, routing calculations, SSE connection resilience backoff, and i18n translation parity are fully verified by automated tests.
+- **Manual Verification:** Full multi-step browser demonstrations (such as interacting with the Leaflet map layers, switching themes, or reviewing physical photos) have been walked through in local sessions and remain documented in [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md).
 
-## Project structure
+---
 
-Verified repository layout:
+## Repository Structure
 
 ```text
 RouteWise/
-├── README.md
-├── requirements.txt                  # Application runtime dependencies (FastAPI, PyTorch, etc.)
-├── requirements-pipeline.txt         # Offline data pipeline & GIS dependencies (OSMnx, etc.)
-├── .env.example                      # Configuration template (variable names only; secrets never committed)
-├── .gitignore                        # Enforces exclusion of .env, databases, caches, and uploads
-├── data/                             # Ground-truth datasets, event logs, place coordinates
-│   └── weather/                      # ERA5-Land NetCDF files (2021-2025)
-├── cache/                            # Geocoding responses and precomputed risk cache (1,821 dates)
-├── docs/                             # System documentation, DEMO_SCRIPT.md, TRANSLATION_REVIEW.md
-│   ├── model_card.md                 # ST-GNN evaluation, calibration, and latency benchmarks
-│   ├── development-plan.md           # 16-week project implementation specification
-│   ├── ARCHITECTURE_NOTES.md         # Architecture and component notes
-│   └── screenshots/                  # Verified dashboard and map interface captures
+├── README.md                          # Primary system documentation
+├── requirements.txt                  # Python application runtime dependencies
+├── requirements-pipeline.txt         # Offline GIS and atmospheric pipeline dependencies
+├── .env.example                      # Configuration template (secrets never committed)
+├── .gitignore                        # Enforces exclusion of .env, databases, caches, uploads
+├── data/                             # Ground-truth datasets and models
+│   ├── routewise_local.db            # Protected historical SQLite database (read-only guarded)
+│   ├── segment_static.csv            # 151 segments static elevation, slope, length
+│   ├── segment_adjacency.csv         # 966 directed segment graph connections
+│   ├── weather_daily_by_segment.csv  # 2021-2025 daily ERA5-Land reanalysis
+│   ├── disruption_candidates.csv     # Verified historical disruption news records
+│   ├── runtime/                      # Isolated runtime storage (git-ignored)
+│   │   └── routewise_live.db         # Runtime database for live weather, risk & alerts
+│   └── weather/                      # Raw ERA5-Land NetCDF archives (2021-2025)
+├── cache/                            # Precomputed risk cache (1,821 dates) & geocoding
+├── docs/                             # Technical documentation
+│   ├── ARCHITECTURE_NOTES.md         # Deep-dive architecture and component notes
+│   ├── DEMO_SCRIPT.md                # 5-7 minute operational evaluation walkthrough
+│   ├── REALTIME_PROGRESS.md          # Real-time intelligence task tracking log
+│   ├── LIVE_DATE_SEMANTICS.md        # Strict UTC alignment & 24h staleness rules
+│   ├── LIVE_WEATHER_VALIDATION.md    # Atmospheric distribution shift evaluation
+│   ├── PERFORMANCE_NOTES.md          # Journey planner latency & query optimizations
+│   ├── TRANSLATION_REVIEW.md         # English/Hindi localization notes and unreviewed keys
+│   └── model_card.md                 # ST-GNN evaluation, calibration, and latency benchmarks
 ├── app/                              # Database and operations CLI utilities
-│   ├── bootstrap_db.py               # Idempotent SQLite schema setup and weather table ingestion
-│   ├── create_patrol.py              # Secure interactive CLI for provisioning patrol accounts
-│   └── seed_demo.py                  # Seeds/clears simulated demo accounts and reports (is_simulated=1)
+│   ├── bootstrap_db.py               # Idempotent SQLite schema setup
+│   ├── create_patrol.py              # Secure interactive CLI for provisioning patrol officers
+│   └── seed_demo.py                  # Seeds/clears simulated demo accounts and reports
 ├── src/
 │   ├── api/                          # FastAPI app, config, dependencies, routes, and schemas
+│   │   ├── routes/                   # auth, corridor, disruptions, events, journey, live, reports, alerts
+│   │   └── schemas/                  # Pydantic request and response schemas
 │   ├── models/                       # ST-GNN inference and calibration wrappers
-│   └── services/                     # Business logic: auth, corridor, disruptions, journey, reports, risk
-├── frontend/                         # React dashboard (Vite, Leaflet, i18n, Vanilla CSS tokens)
+│   └── services/                     # Business logic
+│       ├── weather/                  # Open-Meteo clustering, scheduler, replay provider, storage
+│       ├── alert_service.py          # Alert lifecycle, 1-hour cooldown, auto-clearance
+│       ├── hazard_event_service.py   # Hazard overlays, operational status rule table
+│       ├── journey_service.py        # Corridor journey planning & date substitution
+│       ├── live_risk_service.py      # Live ST-GNN rolling window inference wrapping
+│       ├── report_service.py         # Incident deduplication, linking, photo stripping, DB guard
+│       └── routing_engine.py         # Multi-objective Dijkstra routing engine
+├── frontend/                         # React dashboard (Vite, Leaflet, i18n, Vanilla CSS)
 │   ├── package.json
 │   ├── vite.config.js
-│   ├── test/unit.test.js             # 13 unit tests for sync queue, route guards, and i18n
-│   └── src/                          # Components, context providers, services, and locales
-├── tests/                            # Automated test suite (61 passing pytest tests across 12 modules)
-├── scripts/
-│   ├── check_repo_hygiene.py         # Automated secret leakage and hygiene verification script
-│   └── precompute_risk.py            # Generates precomputed_risk_cache.json from ST-GNN checkpoint
-├── week1_graph_and_terrain.py        # GIS and corridor network extraction (Week 1)
-├── week2a_download_weather.py        # ERA5-Land atmospheric data download (Week 2)
-├── week2b_process_weather.py         # Weather windowing and aggregation (Week 2)
-├── week2c_fill_from_candidates.py    # Disruption event place-name geocoding (Week 2)
-├── week2c_disruption_log.py          # Spatial snapping of events to corridor segments (Week 2)
-├── week3_offline_schema.sql          # Offline SQLite schema definition (Week 3)
-├── week3_create_db.py                # Database creation verification (Week 3)
-├── week4_build_dataset.py            # Chronological model dataset split generation (Week 4)
-├── week6_stgnn.py                    # ST-GNN PyTorch model architecture and baselines (Week 5)
-├── week7_train.py                    # Model training, early stopping, and seed evaluation (Week 6)
-├── stgnn_best.pt                     # Best trained checkpoint (SHA-256: 68B04504EAE6...5054006E)
-├── stgnn_metrics.json                # Evaluated test metrics across 5 seeds
-├── stgnn_metrics_default.json        # Default hyperparameters test metrics
-└── week6_baseline_metrics.json       # Logistic regression baselines
+│   ├── test/unit.test.js             # 49 frontend unit tests (14 test suites)
+│   └── src/
+│       ├── components/               # CorridorStrip, CorridorMap, JourneyPlanner, AlertDrawer, Inspector
+│       ├── i18n/locales/             # en.json and hi.json translation catalogs
+│       ├── services/                 # incidentHelper.js, connectionResilience.js, reportQueue.js
+│       └── theme.css                 # WCAG AA compliant semantic theme tokens
+├── tests/                            # Automated test suite (206 backend tests)
+│   ├── test_incident_deduplication.py# 34 incident deduplication & schema tests
+│   ├── test_journey_golden.py        # 6 historical golden plan fixture tests
+│   ├── test_simulation_isolation.py  # Simulation isolation tests
+│   └── test_*.py                     # Auth, corridor, alerts, weather, routing, calibration tests
+├── stgnn_best.pt                     # Best trained ST-GNN PyTorch checkpoint
+├── stgnn_metrics.json                # Final model evaluation metrics across 5 seeds
+└── week*.py                          # GIS, weather, dataset, ST-GNN training scripts
 ```
 
-## Limitations and known issues
+---
 
-**Scope**
+## Limitations, Known Issues, and Safety Requirements
 
-- The dashboard shows **retrospective, historical** risk estimates. It is not a live forecast, and nothing in the current build reads weather or traffic in real time.
-- Scores are an advisory risk index, not calibrated probabilities. Calibration is imperfect (expected calibration error 0.1308) and the scores were trained on sampled negatives.
-- A date or departure time chosen in the journey planner does not make the model produce a forward forecast. The planner reads historical weather and risk lookups for specified dates and applies vehicle-specific safety parameters (Car, Truck, Motorcycle, Bus, Ambulance).
-- The Flutter field app and full offline operation are **not implemented**. The browser pending queue keeps reports on the device until they can be sent, and nothing more.
-- Route comparison and optimisation are not claimed until implemented and tested. The Ramban–Banihal corridor is essentially a single road, so real alternatives may not exist within it.
-- Photos attached to reports are stored for human review only. There is no ViT or other automated road-condition assessment.
-- Alerts are shown in the app only, in English and Hindi. There is no SMS or push delivery, and no continuous GPS tracking. Location is captured when a report is created.
-- Predictions cover one corridor and a one-day horizon. Other corridors and hazard types are not modelled.
+### Scope Limitations
+- **Advisory Relative Risk:** ST-GNN scores represent an advisory relative-risk index (0.0 to 1.0), not calibrated physical failure probabilities.
+- **Single Physical Corridor:** The NH-44 Ramban–Banihal highway is a single road alignment through the Chenab gorge. No parallel highway alternatives exist within this corridor road graph; RouteWise enforces `has_alternative=False` and will never fabricate phantom bypass detours.
+- **Unvalidated Distribution Shift:** Live numerical forecasts from Open-Meteo diverge from the Copernicus ERA5-Land reanalysis used to train the model. All live outputs are explicitly designated as experimental.
+- **In-App Delivery Boundary:** Disruption alerts and advisories are delivered exclusively within the web application interface. No external SMS gateways, mobile push notifications, or cellular broadcast mechanisms are claimed or used.
+- **Evidence Review Only:** Photos attached to field incident reports serve strictly as human evidence for patrol review. Automated computer-vision classification (ViT) is not implemented.
+- **Browser-Only Offline Queue:** The frontend provides an offline-tolerant IndexedDB report queue in the browser. A native mobile client (Flutter) is not implemented.
 
-**Model**
+### Model Limitations
+- **Rare Event Sample Size:** Real highway closures are rare (only 22 independent events in the 2024–2025 held-out test years). Differences between model seeds are subject to high variance.
+- **False Alarm Trade-off:** At the High-risk threshold ($\ge 0.35$), the model misses 9 of 22 test events and produces 90 false alarms. At the Medium threshold ($\ge 0.10$), it catches 18 of 22 events but produces 249 false alarms.
+- **Sudden Events:** Dry rockfall and sudden cloudbursts without antecedent rainfall cannot be predicted from daily meteorological aggregations alone.
 
-- **Few independent events.** Consecutive-day closures are one disaster logged on several days. There are only 22 events in the test years, so test scores are rough and differences between models are often within the noise.
-- **Many false alarms, some misses.** At the High-tier threshold the model missed 9 of 22 test events and had 90 false alarms. At the Medium threshold it missed 4 and had 249 false alarms.
-- **Hard cases.** Dry rockfall and sudden cloudbursts with no antecedent rainfall are difficult to predict from daily weather.
-- **Coarse weather.** ERA5-Land cells are about 9 km, so neighbouring segments often share the same weather.
-- **Coarse terrain.** SRTM is about 30 m resolution, which blurs steep slopes.
+---
 
-**Data**
+## Roadmap and Next Steps
 
-- **Approximate locations.** Event coordinates come from place names, usually village level. Each is marked low or medium confidence.
-- **Some dates need checking.** Rows whose notes start with `CHECK DATE` were inferred and should be confirmed from the linked article. If any date changes, rebuild the dataset and retrain.
-- **Reported events only.** The log leans toward major closures that made the news, so small slides are missing.
-- **Sampled negatives.** The training tables keep every real event and sample the other days, so model outputs are relative risk scores, not true daily probabilities.
-- **Simulated demo records.** Sample reports and demonstration accounts are not real data and must never be mixed with the training data.
+The full 16-week project implementation specification is recorded in [`docs/development-plan.md`](docs/development-plan.md):
 
-**Security and operations**
+1. **Native Field Mobile Client:** Develop a native Flutter mobile application utilizing the existing SQLite offline schema for remote patrol officers with intermittent cellular reception.
+2. **Multi-Corridor Regional Graph:** Ingest and digitize alternate regional mountain highway alignments (e.g. Mughal Road via Shopian) to enable genuine multi-corridor regional detour evaluation.
+3. **Automated Vision Pipeline:** Train and integrate a Vision Transformer (ViT) to assist patrol officers with automated preliminary classification of attached road-damage and rockfall imagery.
+4. **Professional Linguistic Review:** Conduct native-speaker linguistic audit and certification of the Hindi localized interface (`hi.json`) in collaboration with regional transport safety authorities.
 
-- Uploaded photos are inspected for magic bytes (JPEG/PNG/WebP), file size is capped at 5 MB, and all EXIF camera/GPS metadata is stripped using Pillow (`src/services/report_service.py`). HTTP rate limiting is not implemented in the application layer and should be handled by a reverse proxy (e.g. Nginx) in production.
-- Report photos are stored in `data/uploads/` (git-ignored) and served strictly through authenticated endpoints (`GET /api/v1/reports/{id}/photo`) restricted to the report owner, patrol officers, or administrators.
-- The repository is public. Hardcoded secrets have been sanitized, secret key length and default checking is enforced at startup, and `scripts/check_repo_hygiene.py` audits all tracked files.
+---
 
-**Documentation**
+## Acknowledgements and Data Attribution
 
-- All technical claims, endpoint paths, role permissions, and asset structures have been audited and verified against the codebase.
-- The Hindi text and the official Traffic Police contact details shown in the app must be checked by a person before a demonstration.
-
-## Roadmap and next steps
-
-The full plan, with acceptance gates for every week, is in `development-plan.md`.
-
-1. Run the backend tests and the frontend build, review the `feature/rbac-patrol` pull request, merge it, and replace every **[Unverified]** marker in this README.
-2. Run a read-only audit of the implementation against the three project objectives, and reword any claim that the code does not support.
-3. Confirm the `CHECK DATE` events and rerun the dataset and model if any date changes.
-4. Add server-side report synchronisation: idempotent uploads keyed on a client UUID, duplicate prevention by time and GPS proximity, and documented conflict rules (timeline week 5, second part).
-5. Build the Flutter field app with offline capture on the existing SQLite schema, then connect it to the backend (timeline week 4).
-6. Add risk-aware routing with a distance-only baseline and a "hold or delay" advisory where no alternative road exists (timeline week 8).
-7. Add automated road-condition assessment from photos (ViT) only if labelled data and weights are available, with its evaluation reported separately.
-8. Integration testing, security review, validation, final report and demo (timeline weeks 10 to 12).
-9. Longer term: live weather ingestion, calibration, and a wider corridor, each gated on the core flow being complete.
-
-## Acknowledgements and data-source attribution
-
-- **Road network and basemap:** © OpenStreetMap contributors, available under the Open Database Licence. Accessed with OSMnx.
-- **Elevation:** SRTM, accessed through OpenTopography.
-- **Weather:** ERA5-Land reanalysis. Generated using Copernicus Climate Change Service information. Neither the European Commission nor ECMWF is responsible for any use that may be made of the Copernicus information or data it contains.
-- **Disruption reports:** Greater Kashmir, The Tribune, Kashmir Life, Deccan Herald, ETV Bharat and other news outlets. The source link for each event is kept in `data/disruption_candidates.csv`.
-- **Software:** PyTorch, scikit-learn, FastAPI, Uvicorn, React, Vite, Leaflet and React Leaflet.
-- **Project:** Minor Project Group 21, B.Tech Computer Science and Engineering, MIET Jammu, 2026.
+- **Road Network & Map Basemap:** © OpenStreetMap contributors, accessed via OSMnx under the Open Database Licence.
+- **Digital Elevation Model:** NASA / USGS Shuttle Radar Topography Mission (SRTM), accessed via OpenTopography.
+- **Atmospheric Reanalysis:** ECMWF ERA5-Land reanalysis, generated using Copernicus Climate Change Service information. Neither the European Commission nor ECMWF is responsible for any use that may be made of the Copernicus information.
+- **Live Weather Ingestion:** Open-Meteo Free Weather API (CC BY 4.0).
+- **Disruption Incident Sourcing:** Regional reporting from *Greater Kashmir*, *The Tribune*, *Kashmir Life*, *Deccan Herald*, *ETV Bharat*, and J&K Traffic Police announcements.
+- **Academic Framework:** Minor Project Group 21, Department of Computer Science & Engineering, Model Institute of Engineering and Technology (MIET), Jammu, 2026.

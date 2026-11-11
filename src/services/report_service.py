@@ -6,10 +6,11 @@ Pillow-based EXIF-stripped photo processing, strict state transition validation,
 from __future__ import annotations
 
 import io
+import logging
 import math
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -41,7 +42,45 @@ ALLOWED_TRANSITIONS: Dict[str, List[str]] = {
     ReportStatus.REJECTED.value: [],  # Terminal state
 }
 
+logger = logging.getLogger(__name__)
 MAX_SEGMENT_DISTANCE_METERS = 500.0  # Max distance to associate incident with corridor segment
+
+
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    """Checks whether a table exists in the database schema."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _is_protected_db(path: Path | str | None) -> bool:
+    """Robustly checks whether path points to the protected historical repository database.
+
+    Fail-safe: If path is None, empty, unresolvable, or resolution raises an exception,
+    returns True (protected) so an unresolved path cannot be treated as writable.
+    """
+    if not path:
+        return True
+    try:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        protected_path = (repo_root / "data" / "routewise_local.db").resolve()
+        resolved = Path(path).resolve()
+        return resolved == protected_path
+    except Exception:
+        return True
+
+
+def _ensure_report_additive_columns(conn: sqlite3.Connection) -> None:
+    """Safely and idempotently applies additive columns for deduplication to the reports table."""
+    cols = {c[1] for c in conn.execute("PRAGMA table_info(reports)").fetchall()}
+    if "duplicate_of" not in cols:
+        conn.execute("ALTER TABLE reports ADD COLUMN duplicate_of TEXT;")
+    if "hazard_event_id" not in cols:
+        conn.execute("ALTER TABLE reports ADD COLUMN hazard_event_id TEXT;")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_duplicate_of ON reports(duplicate_of);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_hazard_event ON reports(hazard_event_id);")
 
 
 class ReportService:
@@ -68,6 +107,8 @@ class ReportService:
 
     def _init_db(self) -> None:
         """Initializes tables for reports and audit history."""
+        if _is_protected_db(self.db_path):
+            return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -91,6 +132,8 @@ class ReportService:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     is_simulated INTEGER NOT NULL DEFAULT 0,
+                    duplicate_of TEXT,
+                    hazard_event_id TEXT,
                     FOREIGN KEY(reporter_id) REFERENCES users(id),
                     FOREIGN KEY(assigned_to) REFERENCES users(id)
                 );
@@ -100,6 +143,14 @@ class ReportService:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_reporter ON reports(reporter_id);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_segment ON reports(nearest_segment_id);")
+            if not _is_protected_db(self.db_path):
+                cols = {c[1] for c in conn.execute("PRAGMA table_info(reports)").fetchall()}
+                if "duplicate_of" not in cols:
+                    conn.execute("ALTER TABLE reports ADD COLUMN duplicate_of TEXT;")
+                if "hazard_event_id" not in cols:
+                    conn.execute("ALTER TABLE reports ADD COLUMN hazard_event_id TEXT;")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_duplicate_of ON reports(duplicate_of);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_hazard_event ON reports(hazard_event_id);")
 
             conn.execute(
                 """
@@ -117,6 +168,14 @@ class ReportService:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_report_history_report ON report_status_history(report_id);")
+            conn.commit()
+
+    def apply_additive_migration(self) -> None:
+        """Safely and idempotently applies additive columns to a non-protected database."""
+        if _is_protected_db(self.db_path):
+            raise PermissionError("Cannot apply migrations to protected historical database.")
+        with self._get_connection() as conn:
+            _ensure_report_additive_columns(conn)
             conn.commit()
 
     def _load_segment_geometries(self) -> None:
@@ -215,6 +274,8 @@ class ReportService:
         is_simulated: int = 0,
     ) -> ReportResponse:
         """Creates a new field report with idempotency on client_uuid."""
+        if _is_protected_db(self.db_path):
+            raise PermissionError("Cannot write reports to protected historical database.")
         # 1. Geographic corridor sanity check (J&K region)
         if not (32.0 <= latitude <= 35.0 and 74.0 <= longitude <= 76.5):
             raise HTTPException(
@@ -232,6 +293,13 @@ class ReportService:
 
         # 3. Idempotency Check
         with self._get_connection() as conn:
+            cols = {c[1] for c in conn.execute("PRAGMA table_info(reports)").fetchall()}
+            if "duplicate_of" not in cols or "hazard_event_id" not in cols:
+                raise RuntimeError(
+                    "Schema incompatible: table 'reports' missing required additive columns "
+                    "'duplicate_of' and 'hazard_event_id'. Run additive migration."
+                )
+
             existing = conn.execute("SELECT * FROM reports WHERE client_uuid = ?", (client_uuid,)).fetchone()
             if existing:
                 return self._row_to_report(conn, existing)
@@ -247,15 +315,42 @@ class ReportService:
             report_id = str(uuid.uuid4())
             now = datetime.now(timezone.utc).isoformat()
             init_status = ReportStatus.SUBMITTED.value
+            duplicate_of = None
+            hazard_event_id = None
+            if nearest_seg and _has_table(conn, "hazard_event"):
+                cat_norm = category.lower().replace(" ", "_").replace("-", "_")
+                h_type = cat_norm if cat_norm in ("landslide", "shooting_stones", "flooding", "road_damage") else "road_damage"
+                dedup_hours = getattr(settings, "dedup_window_hours", 24.0)
+                dedup_limit = (datetime.now(timezone.utc) - timedelta(hours=dedup_hours)).isoformat()
+                active_ev = conn.execute(
+                    """
+                    SELECT id, source_report_id, report_count, last_reported_at
+                    FROM hazard_event
+                    WHERE segment_id = ?
+                      AND hazard_type = ?
+                      AND COALESCE(is_simulated, 0) = ?
+                      AND status = 'active'
+                      AND expires_at > ?
+                      AND (created_at >= ? OR (last_reported_at IS NOT NULL AND last_reported_at >= ?))
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                    """,
+                    (nearest_seg, h_type, 1 if is_simulated else 0, now, dedup_limit, dedup_limit),
+                ).fetchone()
+
+                if active_ev:
+                    hazard_event_id = active_ev["id"]
+                    # duplicate_of strictly references the primary reports.id (or None if event has no source report)
+                    duplicate_of = active_ev["source_report_id"] if active_ev["source_report_id"] else None
 
             conn.execute(
                 """
                 INSERT INTO reports (
                     id, client_uuid, reporter_id, category, description, latitude, longitude,
                     nearest_segment_id, nearest_segment_distance_m, photo_path, status, assigned_to,
-                    client_created_at, created_at, updated_at, is_simulated
+                    client_created_at, created_at, updated_at, is_simulated, duplicate_of, hazard_event_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report_id,
@@ -273,6 +368,8 @@ class ReportService:
                     now,
                     now,
                     is_simulated,
+                    duplicate_of,
+                    hazard_event_id,
                 ),
             )
 
@@ -406,6 +503,8 @@ class ReportService:
         actor: UserProfile,
     ) -> ReportResponse:
         """Performs state machine transition with audit logging."""
+        if _is_protected_db(self.db_path):
+            raise PermissionError("Cannot update report status in protected historical database.")
         with self._get_connection() as conn:
             row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
             if not row:
@@ -454,6 +553,18 @@ class ReportService:
             conn.commit()
 
             updated = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+            try:
+                from src.services.hazard_event_service import hazard_event_service
+                hazard_event_service.on_report_status_change(
+                    report_id=report_id,
+                    status_value=new_status,
+                    category=updated["category"],
+                    segment_id=updated["nearest_segment_id"],
+                    actor_id=actor.id,
+                    is_simulated=bool(updated["is_simulated"]),
+                )
+            except Exception as ev_err:
+                logger.error("Failed to sync hazard event on report status update: %s", ev_err)
             return self._row_to_report(conn, updated)
 
     def assign_report(
@@ -464,6 +575,8 @@ class ReportService:
         actor: UserProfile,
     ) -> ReportResponse:
         """Assigns report to a verified patrol officer."""
+        if _is_protected_db(self.db_path):
+            raise PermissionError("Cannot assign reports in protected historical database.")
         with self._get_connection() as conn:
             row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
             if not row:
@@ -513,6 +626,18 @@ class ReportService:
             conn.commit()
 
             updated = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
+            try:
+                from src.services.hazard_event_service import hazard_event_service
+                hazard_event_service.on_report_status_change(
+                    report_id=report_id,
+                    status_value=new_status,
+                    category=updated["category"],
+                    segment_id=updated["nearest_segment_id"],
+                    actor_id=actor.id,
+                    is_simulated=bool(updated["is_simulated"]),
+                )
+            except Exception as ev_err:
+                logger.error("Failed to sync hazard event on report status update: %s", ev_err)
             return self._row_to_report(conn, updated)
 
     def get_summary_stats(self) -> ReportSummaryStats:
@@ -610,6 +735,8 @@ class ReportService:
             updated_at=row["updated_at"],
             is_simulated=bool(row["is_simulated"]),
             history=history_items,
+            duplicate_of=row["duplicate_of"] if ("duplicate_of" in row.keys()) else None,
+            hazard_event_id=row["hazard_event_id"] if ("hazard_event_id" in row.keys()) else None,
         )
 
 

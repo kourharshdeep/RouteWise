@@ -1,7 +1,7 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, CheckCircle, Info, ShieldAlert } from 'lucide-react';
 import sortedSegmentIds from '../data/corridorSegmentsSorted.json';
+import { getSegmentAccessibilityCue } from '../services/liveModeHelper.js';
 
 const LANDMARKS = [
   { index: 0, name: 'Chanderkot', chainage: 'Km 0' },
@@ -17,9 +17,12 @@ export default function CorridorStrip({
   selectedSegmentId,
   onSelectSegment,
   selectedDate,
+  mode = 'historical',
+  isLiveUpdated = false,
 }) {
   const { t } = useTranslation();
   const stripRef = useRef(null);
+  const isLive = mode === 'live';
 
   // Monotonically ordered segments from South (Chanderkot/Ramban) to North (Banihal)
   const segments = useMemo(() => {
@@ -50,8 +53,20 @@ export default function CorridorStrip({
         <div className="corridor-strip-title">
           <span className="strip-dot" />
           <strong>NH-44 Ramban–Banihal Continuous Corridor Strip</strong>
-          <span className="badge badge-subtle">{selectedDate}</span>
-          <span className="badge badge-retrospective">{t('app.retrospective_badge')}</span>
+          {isLive ? (
+            <>
+              <span className="badge badge-subtle">{selectedDate}</span>
+              <span className="badge badge-subtle">{t('live.live_mode')}</span>
+              <span className="badge badge-warning" style={{ fontSize: 10 }}>
+                {t('live.experimental_badge')}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="badge badge-subtle">{selectedDate}</span>
+              <span className="badge badge-retrospective">{t('app.retrospective_badge')}</span>
+            </>
+          )}
         </div>
         <div className="corridor-strip-legend" aria-hidden="true">
           <span className="legend-chip chip-low">
@@ -62,6 +77,9 @@ export default function CorridorStrip({
           </span>
           <span className="legend-chip chip-high">
             <span className="pattern-cross" /> {t('risk.high')} (≥0.35)
+          </span>
+          <span className="legend-chip chip-unknown">
+            <span style={{ fontSize: 9 }}>?</span> {t('risk.unknown')}
           </span>
         </div>
       </div>
@@ -84,8 +102,13 @@ export default function CorridorStrip({
         })}
       </div>
 
-      {/* Horizontal Segment Track */}
-      <div className="corridor-strip-container" ref={stripRef} tabIndex={0} aria-label="Corridor Segments list">
+      {/* Horizontal Segment Track with subtle live update flash */}
+      <div
+        className={`corridor-strip-container ${isLiveUpdated ? 'live-update-flash' : ''}`}
+        ref={stripRef}
+        tabIndex={0}
+        aria-label="Corridor Segments list"
+      >
         <div className="corridor-strip-track">
           {segments.length === 0 ? (
             <div className="strip-empty-placeholder">Loading 151 corridor segments...</div>
@@ -94,21 +117,24 @@ export default function CorridorStrip({
               const score = seg.risk_score;
               const tier = seg.risk_tier || 'UNKNOWN';
               const isSelected = selectedSegmentId === seg.segment_id;
+              const opStatus = seg.operational_status;
+              const hasEvents = seg.active_events && seg.active_events.length > 0;
 
-              let tierClass = 'seg-unknown';
-              let accessibilityIcon = '?';
-              if (tier === 'High') {
-                tierClass = 'seg-high';
-                accessibilityIcon = '▲';
-              } else if (tier === 'Medium') {
-                tierClass = 'seg-medium';
-                accessibilityIcon = '■';
-              } else if (tier === 'Low') {
-                tierClass = 'seg-low';
-                accessibilityIcon = '●';
-              }
+              const cue = getSegmentAccessibilityCue(tier, seg.status, seg.is_stale, t);
+              const accessibilityIcon = cue.symbol;
+              const tierClass = isLive && (seg.is_stale || seg.status === 'STALE_DATA')
+                ? 'seg-unknown chip-stale'
+                : tier === 'High'
+                ? 'seg-high'
+                : tier === 'Medium'
+                ? 'seg-medium'
+                : tier === 'Low'
+                ? 'seg-low'
+                : 'seg-unknown';
 
               const scoreLabel = score !== null && score !== undefined ? score.toFixed(3) : 'N/A';
+              const opLabel = opStatus ? `\nStatus: ${opStatus}` : '';
+              const evLabel = hasEvents ? `\nEvents: ${seg.active_events.map((e) => e.hazard_type).join(', ')}` : '';
 
               return (
                 <button
@@ -118,8 +144,8 @@ export default function CorridorStrip({
                   className={`corridor-seg-bar ${tierClass} ${isSelected ? 'selected' : ''}`}
                   onClick={() => onSelectSegment(seg.segment_id)}
                   onKeyDown={(e) => handleKeyDown(e, idx)}
-                  aria-label={`Segment ${idx + 1}: ${tier} risk, score ${scoreLabel}`}
-                  title={`Segment ${idx + 1} (${seg.segment_id})\nRisk: ${tier} (${scoreLabel})\nClick to inspect input features`}
+                  aria-label={`Segment ${idx + 1}: ${cue.ariaLabel}, score ${scoreLabel}${opStatus ? `, status ${opStatus}` : ''}`}
+                  title={`Segment ${idx + 1} (${seg.segment_id})\nRisk: ${tier} (${scoreLabel})${opLabel}${evLabel}\nClick to inspect features`}
                 >
                   <span className="seg-cues" aria-hidden="true">
                     {accessibilityIcon}
@@ -133,7 +159,7 @@ export default function CorridorStrip({
 
       <div className="corridor-strip-footer">
         <span className="strip-help-text">
-          Use <strong>← / →</strong> keyboard arrows or click any segment bar to view real slope, rainfall features, and field incident reports in the Risk Drawer.
+          Use <strong>← / →</strong> keyboard arrows or click any segment bar to view real slope, rainfall features, and incident reports in the Risk Drawer.
         </span>
       </div>
     </div>

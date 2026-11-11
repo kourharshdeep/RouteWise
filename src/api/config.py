@@ -103,6 +103,18 @@ class Settings:
     uploads_dir: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_UPLOADS_DIR", "data/uploads")))
     weather_daily_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_WEATHER_PATH", "data/weather_daily_by_segment.csv")))
 
+    # Real-Time Intelligence & Live Weather Mode (off | replay | live)
+    live_mode: str = field(
+        default_factory=lambda: (
+            os.getenv("ROUTEWISE_LIVE_MODE", "off").strip().lower()
+            if os.getenv("ROUTEWISE_LIVE_MODE", "off").strip().lower() in ("off", "replay", "live")
+            else "off"
+        )
+    )
+    live_db_path: Path = field(default_factory=lambda: Path(os.getenv("ROUTEWISE_LIVE_DB_PATH", "data/runtime/routewise_live.db")))
+    live_weather_interval_minutes: int = field(default_factory=lambda: int(os.getenv("LIVE_WEATHER_INTERVAL_MINUTES", "60")))
+    dedup_window_hours: float = field(default_factory=lambda: float(os.getenv("ROUTEWISE_DEDUP_WINDOW_HOURS", "24.0")))
+
     # Optional External AI API Key (never exposed to frontend)
     gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))

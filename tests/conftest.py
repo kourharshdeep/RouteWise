@@ -155,3 +155,59 @@ def isolated_test_environment():
         shutil.rmtree(_TEST_TEMP_DIR, ignore_errors=True)
     except Exception:
         pass
+
+
+import socket
+
+
+@pytest.fixture(autouse=True)
+def guard_outbound_sockets(monkeypatch):
+    """Prevents any real outbound socket connection or DNS lookup during tests while allowing in-process TestClient."""
+    orig_connect = socket.socket.connect
+    orig_connect_ex = socket.socket.connect_ex
+    orig_getaddrinfo = socket.getaddrinfo
+
+    loopback_hosts = {"127.0.0.1", "localhost", "::1", "::ffff:127.0.0.1", None, ""}
+
+    def blocked_connect(self, address):
+        host = address[0] if isinstance(address, tuple) and len(address) > 0 else address
+        if host in loopback_hosts:
+            return orig_connect(self, address)
+        raise RuntimeError(
+            f"Real outbound socket connection to '{host}' is strictly prohibited in tests. "
+            f"All network requests must be mocked."
+        )
+
+    def blocked_connect_ex(self, address):
+        host = address[0] if isinstance(address, tuple) and len(address) > 0 else address
+        if host in loopback_hosts:
+            return orig_connect_ex(self, address)
+        raise RuntimeError(
+            f"Real outbound socket connect_ex to '{host}' is strictly prohibited in tests. "
+            f"All network requests must be mocked."
+        )
+
+    def blocked_getaddrinfo(host, port, *args, **kwargs):
+        if host in loopback_hosts:
+            return orig_getaddrinfo(host, port, *args, **kwargs)
+        raise RuntimeError(
+            f"Real DNS lookup for '{host}' is strictly prohibited in tests. "
+            f"All network requests must be mocked."
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", blocked_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked_connect_ex)
+    monkeypatch.setattr(socket, "getaddrinfo", blocked_getaddrinfo)
+
+
+@pytest.fixture
+def set_live_mode():
+    """Allows tests to explicitly configure ROUTEWISE_LIVE_MODE on frozen Settings with automatic restoration."""
+    old_mode = settings.live_mode
+
+    def _setter(mode: str) -> None:
+        object.__setattr__(settings, "live_mode", mode)
+
+    yield _setter
+
+    object.__setattr__(settings, "live_mode", old_mode)

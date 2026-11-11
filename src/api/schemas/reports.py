@@ -75,6 +75,8 @@ class ReportResponse(BaseModel):
     updated_at: str
     is_simulated: bool = False
     history: List[ReportStatusHistoryItem] = []
+    duplicate_of: Optional[str] = None
+    hazard_event_id: Optional[str] = None
 
 
 class PublicReportItem(BaseModel):

@@ -132,10 +132,9 @@ def test_no_four_point_five_km_floor():
     """Short distances must reflect genuine segment lengths without artificial 4.5 km floor."""
     from src.services.journey_service import journey_service
     # Test with a single segment slice
-    saved_ids = journey_service._sorted_segment_ids
     try:
         # Pick one short segment
-        first_seg_id = saved_ids[0]
+        first_seg_id = journey_service._sorted_segment_ids[0]
         geojson = client.get("/api/v1/corridor/segments").json()
         feat = next(f for f in geojson["features"] if f["id"] == first_seg_id)
         real_len_km = round(feat["properties"]["length_m"] / 1000.0, 2)
@@ -143,6 +142,9 @@ def test_no_four_point_five_km_floor():
 
         # Temporarily restrict sorted ids to 1 segment to simulate minimal route
         journey_service._sorted_segment_ids = [first_seg_id]
+        journey_service._place_to_sorted_idx = {
+            p.id: 0 for p in journey_service._places
+        }
         res = client.post(
             "/api/v1/journey/plan",
             json={"origin": "Ramban Gateway", "destination": "Banihal Gateway", "date": "2023-07-09"},
@@ -152,7 +154,7 @@ def test_no_four_point_five_km_floor():
         assert data["total_distance_km"] == real_len_km
         assert data["total_distance_km"] != 4.5
     finally:
-        journey_service._sorted_segment_ids = saved_ids
+        journey_service.reset_static_cache()
 
 
 def test_all_151_segments_have_static_properties():

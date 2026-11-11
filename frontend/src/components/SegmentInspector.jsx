@@ -227,6 +227,31 @@ export default function SegmentInspector({
           </div>
         )}
 
+        {/* Active Hazard Events (Task 4) */}
+        {riskItem?.active_events && riskItem.active_events.length > 0 && (
+          <div className="inspector-active-events" data-testid="inspector-active-events" style={{ margin: '8px 0' }}>
+            <div className="inspector-section-divider">
+              <AlertCircle size={13} />
+              <span>{t('inspector.active_hazards', 'Active Hazards')}</span>
+            </div>
+            {riskItem.active_events.map((ev) => (
+              <div key={ev.id} className="inspector-row" style={{ fontSize: 12 }}>
+                <span className="inspector-label" style={{ textTransform: 'capitalize' }}>
+                  {ev.hazard_type.replace(/_/g, ' ')} ({ev.severity})
+                  {ev.last_reported_at && (
+                    <span style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)', textTransform: 'none' }}>
+                      {t('inspector.latest_verified_report', 'Latest verified report')}: {new Date(ev.last_reported_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </span>
+                <span className="inspector-value">
+                  {ev.report_count > 1 ? `${ev.report_count} reports` : '1 report'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Linked Incident Reports */}
         <div className="inspector-section-divider">
           <Shield size={13} />

@@ -45,7 +45,7 @@ export const VEHICLE_OPTIONS = [
     icon: <ShieldAlert size={24} />,
     speed: '35 km/h',
     vulnerability: 'Controlled',
-    badgeColor: 'var(--accent-primary)',
+    badgeColor: 'var(--accent-primary-fg)',
     summary: 'Special emergency or police convoy. Requires dedicated traffic control protocol.',
   },
 ];

@@ -20,7 +20,8 @@ class JourneyPlanRequest(BaseModel):
 
     origin: str = Field(..., description="Origin landmark (e.g. 'Ramban', 'Banihal', 'Digdol')")
     destination: str = Field(..., description="Destination landmark (e.g. 'Banihal', 'Ramban')")
-    date: str = Field(..., description="Journey date in YYYY-MM-DD format")
+    date: Optional[str] = Field(None, description="Journey date in YYYY-MM-DD format (required for historical mode)")
+    mode: str = Field(default="historical", description="Routing mode: 'historical' | 'live'")
     departure_time: str = Field(default="08:00", description="Preferred departure time (HH:MM)")
     arrival_deadline: Optional[str] = Field(None, description="Optional target arrival deadline (HH:MM)")
     vehicle_type: str = Field(
@@ -41,6 +42,7 @@ class SegmentItineraryItem(BaseModel):
     risk_tier: str
     highway: str
     hazard_notes: Optional[str] = None
+    operational_status: Optional[str] = None
 
 
 class VehicleAdvisory(BaseModel):
@@ -52,6 +54,27 @@ class VehicleAdvisory(BaseModel):
     operational_clearance: str  # Cleared, Caution, Restricted
     advisory_text: str
     model_applicability_note: str
+
+
+class RouteAlternative(BaseModel):
+    """Side-by-side alternative route evaluation (baseline distance vs risk-aware)."""
+
+    name: str = Field(..., description="Route variant: 'baseline_shortest' | 'risk_aware'")
+    total_distance_km: float = Field(..., description="Total route distance in kilometers")
+    estimated_travel_minutes: int = Field(..., description="Estimated travel time in minutes")
+    travel_time_disclaimer: str = Field(
+        default="Estimated transit time calculated from assumed vehicle speeds and hazard buffers; not measured live telemetry."
+    )
+    overall_risk: str = Field(..., description="Overall route risk tier: Low | Medium | High | Unknown")
+    max_risk_score: Optional[float] = Field(None, description="Maximum segment risk score")
+    average_risk_score: Optional[float] = Field(None, description="Average segment risk score")
+    high_risk_segments_count: int = Field(..., description="High risk segments count")
+    medium_risk_segments_count: int = Field(..., description="Medium risk segments count")
+    low_risk_segments_count: int = Field(..., description="Low risk segments count")
+    unknown_segments_count: int = Field(default=0, description="Unknown segments count")
+    blocking_segments: List[str] = Field(default_factory=list, description="Closed or impassable segment IDs")
+    is_passable: bool = Field(True, description="False if blocked by closed segment")
+    trade_off_explanation: str = Field(default="", description="Router pathfinding explanation")
 
 
 class JourneyPlanResponse(BaseModel):
@@ -83,4 +106,49 @@ class JourneyPlanResponse(BaseModel):
     historical_disruptions_on_route: int
     retrospective_notice: str
     itinerary: List[SegmentItineraryItem]
+    # Step 6 Dynamic Routing & Recommendation Contract:
+    mode: str = Field(default="historical", description="'historical' | 'live'")
+    recommendation: str = Field(
+        default="PROCEED",
+        description="Operational advisory recommendation: PROCEED | PROCEED_WITH_CAUTION | DELAY | HOLD | NO_DATA",
+    )
+    recommendation_reason: str = Field(
+        default="",
+        description="Explicit operational explanation for recommendation",
+    )
+    blocking_segments: List[str] = Field(
+        default_factory=list,
+        description="Segments closed or blocked along route",
+    )
+    has_alternative: bool = Field(
+        default=False,
+        description="True only if an actual topological bypass exists in corridor graph",
+    )
+    baseline_route: Optional[RouteAlternative] = Field(
+        default=None,
+        description="Distance-only baseline calculation",
+    )
+    risk_aware_route: Optional[RouteAlternative] = Field(
+        default=None,
+        description="Multi-objective risk-penalized calculation",
+    )
+    requested_date: Optional[str] = Field(
+        default=None,
+        description="The original journey date requested by the client",
+    )
+    date_substituted: bool = Field(
+        default=False,
+        description="True if requested date was substituted with the latest available live risk date",
+    )
+    actual_date: Optional[str] = Field(
+        default=None,
+        description="The actual telemetry date used to evaluate the journey plan",
+    )
 
+    def model_dump(self, *args, **kwargs):
+        d = super().model_dump(*args, **kwargs)
+        if not self.date_substituted and self.requested_date is None and self.actual_date is None:
+            d.pop("requested_date", None)
+            d.pop("date_substituted", None)
+            d.pop("actual_date", None)
+        return d

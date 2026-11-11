@@ -37,7 +37,7 @@ export default function AlongRouteServicesCard({ onSelectLocation }) {
       case 'hospital':
         return <span style={{ color: 'var(--danger)' }}>🏥</span>;
       case 'police':
-        return <span style={{ color: 'var(--accent-primary)' }}>👮</span>;
+        return <span style={{ color: 'var(--accent-primary-fg)' }}>👮</span>;
       case 'fuel':
         return <span style={{ color: 'var(--warning)' }}>⛽</span>;
       case 'mechanic':

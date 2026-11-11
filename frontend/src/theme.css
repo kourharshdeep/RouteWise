@@ -29,9 +29,11 @@ body[data-theme="dark"] {
   --text-on-accent: #ffffff;
 
   /* Brand Accents */
-  --accent-primary: #0284c7;
+  --accent-primary: #0369a1;
+  --accent-primary-fg: #38bdf8;
   --accent-secondary: #38bdf8;
-  --accent-hover: #0369a1;
+  --text-on-accent-secondary: #0b0f19;
+  --accent-hover: #075985;
 
   /* Status Tokens: Risk Tiers */
   --risk-high: #ef4444;
@@ -110,9 +112,11 @@ body[data-theme="light"] {
   --text-on-accent: #ffffff;
 
   /* Brand Accents */
-  --accent-primary: #0284c7;
+  --accent-primary: #0369a1;
+  --accent-primary-fg: #0369a1;
   --accent-secondary: #0369a1;
-  --accent-hover: #075985;
+  --text-on-accent-secondary: #ffffff;
+  --accent-hover: #0c4a6e;
 
   /* Status Tokens: Risk Tiers (High contrast for light theme) */
   --risk-high: #dc2626;
